@@ -44,6 +44,7 @@ Teach session basics:
 ```bash
 tas teach start --name "Employee Signup Session"
 tas teach event --session-id <SESSION_ID> --type open_url
+tas teach event --session-id <SESSION_ID> --type fill --set selector="input[name='email']" --set value="{{record.email}}"
 tas teach checkpoint --session-id <SESSION_ID> --name "form-submitted"
 tas teach finish --session-id <SESSION_ID>
 tas teach export --session-id <SESSION_ID> --output-file artifacts/session.json

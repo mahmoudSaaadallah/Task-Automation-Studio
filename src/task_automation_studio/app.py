@@ -49,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
     teach_event.add_argument("--session-id", required=True, help="Teach session id.")
     teach_event.add_argument("--type", required=True, choices=[item.value for item in TeachEventType], help="Event type.")
     teach_event.add_argument("--payload", default="{}", help="Event payload as JSON object string.")
+    teach_event.add_argument(
+        "--set",
+        dest="payload_pairs",
+        action="append",
+        default=[],
+        help="Event payload entry in key=value format (can be repeated).",
+    )
     teach_event.add_argument("--sensitive", action="store_true", help="Mark event as sensitive.")
 
     teach_checkpoint = teach_sub.add_parser("checkpoint", help="Add a checkpoint event.")
@@ -129,6 +136,7 @@ def main() -> int:
         if args.teach_command == "event":
             try:
                 payload = _parse_payload_json(args.payload)
+                payload.update(_parse_payload_pairs(args.payload_pairs))
             except ValueError as exc:
                 logger.error(str(exc))
                 return 2
@@ -191,6 +199,19 @@ def _parse_payload_json(payload: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("Payload JSON must be an object.")
     return value
+
+
+def _parse_payload_pairs(pairs: list[str]) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"Invalid --set value '{pair}'. Expected key=value.")
+        key, value = pair.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("Payload key in --set cannot be empty.")
+        payload[key] = value
+    return payload
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from task_automation_studio.app import _parse_payload_json, build_parser
+from task_automation_studio.app import _parse_payload_json, _parse_payload_pairs, build_parser
 
 
 def test_parse_payload_json_accepts_object() -> None:
@@ -21,3 +21,9 @@ def test_parser_supports_teach_start() -> None:
     assert args.command == "teach"
     assert args.teach_command == "start"
     assert args.name == "session A"
+
+
+def test_parse_payload_pairs() -> None:
+    payload = _parse_payload_pairs(["selector=input[name=email]", "value={{record.email}}"])
+    assert payload["selector"] == "input[name=email]"
+    assert payload["value"] == "{{record.email}}"
