@@ -19,6 +19,11 @@ python -m task_automation_studio.app --ui
 - `Teach`: تسجيل جلسات التعليم وإخراجها.
 - `Workflow`: التحقق من ملفات workflow قبل التشغيل.
 
+في تبويب `Teach` أصبح متاح:
+- `Start Auto Record`: يبدأ تسجيل تلقائي للأحداث (mouse/keyboard).
+- الإيقاف التلقائي عند الضغط `Esc`.
+- `Replay Session`: يعيد تشغيل نفس الأحداث المسجلة.
+
 ## 2) تجهيز ملف البيانات
 أنشئ ملف Excel يحتوي الأعمدة التالية بالضبط:
 - `first_name`
@@ -29,6 +34,12 @@ python -m task_automation_studio.app --ui
 
 ## 3) تسجيل جلسة تعليم (Teach Session)
 يمكن تنفيذها من تبويب `Teach` في الواجهة أو من CLI.
+
+تسجيل تلقائي (مفضل):
+```powershell
+tas teach record --name "Employee Signup Session"
+```
+ثم اضغط `Esc` لإيقاف التسجيل.
 
 ابدأ جلسة:
 ```powershell
@@ -69,6 +80,16 @@ tas run --workflow-file artifacts/employee_signup_v1.workflow.json --input-file 
 ```powershell
 tas run --workflow-file artifacts/employee_signup_v1.workflow.json --input-file data/employees.xlsx --live-run --email-host imap.example.com --email-username user@example.com --email-password SECRET
 ```
+
+## Replay للجلسة المسجلة
+```powershell
+tas teach replay --session-id <SESSION_ID> --speed-factor 1.0
+```
+
+مهم:
+- Replay يتحكم فعليًا في الماوس والكيبورد.
+- للحصول على أفضل دقة، شغّل بنفس دقة الشاشة ونفس ترتيب النوافذ.
+- في التطبيقات الديناميكية جدًا، قد تحتاج checkpoints أو workflow مهيكل بدل replay الخام.
 
 ## 6) مخرجات التشغيل
 - نتائج Excel: داخل `artifacts/` أو المسار الذي تحدده بـ `--output-file`.

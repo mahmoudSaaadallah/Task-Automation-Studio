@@ -49,12 +49,14 @@ tas workflow validate --workflow-file docs/design/examples/zoom_signup.workflow.
 Teach session basics:
 ```bash
 tas teach start --name "Employee Signup Session"
+tas teach record --name "Employee Signup Session"
 tas teach event --session-id <SESSION_ID> --type open_url
 tas teach event --session-id <SESSION_ID> --type fill --set selector="input[name='email']" --set value="{{record.email}}"
 tas teach checkpoint --session-id <SESSION_ID> --name "form-submitted"
 tas teach finish --session-id <SESSION_ID>
 tas teach export --session-id <SESSION_ID> --output-file artifacts/session.json
 tas teach compile --session-id <SESSION_ID> --workflow-id employee_signup_v1 --output-file artifacts/employee_signup_v1.workflow.json
+tas teach replay --session-id <SESSION_ID> --speed-factor 1.0
 ```
 
 Outputs:
