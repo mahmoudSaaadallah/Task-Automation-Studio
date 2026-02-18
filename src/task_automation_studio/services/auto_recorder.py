@@ -3,8 +3,10 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any
+from uuid import uuid4
 
 from task_automation_studio.core.teach_models import TeachEventType
+from task_automation_studio.services.smart_locator import capture_click_anchors
 from task_automation_studio.services.teach_sessions import TeachSessionService
 
 
@@ -120,10 +122,21 @@ class AutoTeachRecorder:
         session_id = self._session_id
         if not session_id:
             return
+
+        event_id = uuid4().hex
+        payload: dict[str, Any] = {"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()}
+        smart_locator = self._capture_smart_locator(session_id=session_id, event_id=event_id, x=x, y=y)
+        if smart_locator is not None:
+            payload["smart_locator"] = smart_locator
+        window_context = self._active_window_context()
+        if window_context is not None:
+            payload["window_context"] = window_context
+
         self._service.add_event(
             session_id=session_id,
             event_type=TeachEventType.MOUSE_CLICK,
-            payload={"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()},
+            payload=payload,
+            event_id=event_id,
             sensitive=False,
         )
 
@@ -194,3 +207,44 @@ class AutoTeachRecorder:
             self._pressed_modifiers.discard(modifier_name)
             return
         self._pressed_keys.discard(key_name)
+
+    def _capture_smart_locator(
+        self, *, session_id: str, event_id: str, x: int, y: int
+    ) -> dict[str, Any] | None:
+        return capture_click_anchors(
+            artifacts_dir=self._service.artifacts_dir(),
+            session_id=session_id,
+            event_id=event_id,
+            x=x,
+            y=y,
+        )
+
+    def _active_window_context(self) -> dict[str, object] | None:
+        try:
+            import pygetwindow as gw  # pylint: disable=import-outside-toplevel
+        except Exception:  # pragma: no cover - dependency/platform dependent
+            return None
+
+        try:
+            window = gw.getActiveWindow()
+        except Exception:  # pragma: no cover - OS dependent
+            return None
+        if window is None:
+            return None
+
+        title = str(getattr(window, "title", "")).strip()
+        left = getattr(window, "left", None)
+        top = getattr(window, "top", None)
+        width = getattr(window, "width", None)
+        height = getattr(window, "height", None)
+
+        payload: dict[str, object] = {}
+        if title:
+            payload["title"] = title
+        if all(isinstance(value, int) for value in (left, top, width, height)):
+            if width > 0 and height > 0:
+                payload["left"] = left
+                payload["top"] = top
+                payload["width"] = width
+                payload["height"] = height
+        return payload or None

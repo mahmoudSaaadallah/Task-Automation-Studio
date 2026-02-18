@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
+from task_automation_studio.services.smart_locator import resolve_smart_click_position
 from task_automation_studio.services.teach_sessions import TeachSessionService
 
 
@@ -182,6 +183,9 @@ class TeachSessionReplayer:
             x = event.payload.get("x")
             y = event.payload.get("y")
             button_name = str(event.payload.get("button", "left"))
+            smart_click = resolve_smart_click_position(event.payload)
+            if smart_click is not None:
+                x, y = smart_click
             if isinstance(x, int) and isinstance(y, int):
                 mouse_controller.position = (x, y)
             mouse_controller.click(_button_name_to_key(button_name, mouse_module), 1)

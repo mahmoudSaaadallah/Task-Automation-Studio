@@ -72,3 +72,8 @@ class TeachSessionService:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(data.model_dump(mode="json"), indent=2), encoding="utf-8")
         return output_path
+
+    def artifacts_dir(self) -> Path:
+        path = self._settings.artifacts_dir
+        path.mkdir(parents=True, exist_ok=True)
+        return path

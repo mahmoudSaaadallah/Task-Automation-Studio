@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 from task_automation_studio.core.teach_models import TeachEventType
 from task_automation_studio.services.auto_recorder import AutoTeachRecorder, _button_to_name, _key_to_name
@@ -24,6 +25,9 @@ class _FakeSessionService:
 
     def finish_session(self, *, session_id: str) -> None:
         self.finished.append(session_id)
+
+    def artifacts_dir(self) -> Path:
+        return Path("artifacts")
 
 
 def test_button_to_name() -> None:
@@ -53,3 +57,28 @@ def test_hotkey_recording_ctrl_v() -> None:
     assert isinstance(payload, dict)
     assert payload["key"] == "v"
     assert payload["modifiers"] == ["ctrl"]
+
+
+def test_mouse_click_records_smart_locator_payload() -> None:
+    service = _FakeSessionService()
+    recorder = AutoTeachRecorder(session_service=service)
+    recorder._session_id = "session-1"  # type: ignore[attr-defined]
+    recorder._running = True  # type: ignore[attr-defined]
+    recorder._start_ts = time.perf_counter()  # type: ignore[attr-defined]
+    recorder._capture_smart_locator = lambda **_kwargs: {  # type: ignore[method-assign, assignment]
+        "version": 1,
+        "anchors": [{"anchor_id": "target", "path": "x.png", "dx": 0, "dy": 0, "weight": 1.0}],
+    }
+    recorder._active_window_context = lambda: {"title": "Example"}  # type: ignore[method-assign, assignment]
+
+    recorder._on_click(100, 200, "Button.left", True)  # type: ignore[attr-defined]
+
+    assert len(service.events) == 1
+    event = service.events[0]
+    assert event["event_type"] == TeachEventType.MOUSE_CLICK
+    assert isinstance(event["payload"], dict)
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    assert payload["smart_locator"]["version"] == 1
+    assert payload["window_context"]["title"] == "Example"
+    assert event["event_id"]

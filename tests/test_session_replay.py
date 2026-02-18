@@ -111,6 +111,46 @@ def test_apply_hotkey_event() -> None:
     ]
 
 
+def test_apply_mouse_click_prefers_smart_locator() -> None:
+    event = TeachEventData(
+        event_id="e_click",
+        event_type=TeachEventType.MOUSE_CLICK,
+        payload={"x": 10, "y": 20, "button": "left", "smart_locator": {"version": 1, "anchors": []}},
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    class _MouseControllerCapture(_MouseControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.clicked = False
+
+        def click(self, *_args):  # type: ignore[no-untyped-def]
+            self.clicked = True
+            return None
+
+    from task_automation_studio.services import session_replay as sr
+
+    original = sr.resolve_smart_click_position
+    sr.resolve_smart_click_position = lambda _payload: (44, 66)  # type: ignore[assignment]
+    try:
+        keyboard_controller = _KeyboardControllerStub()
+        mouse_controller = _MouseControllerCapture()
+        replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
+        applied = replayer._apply_event(  # type: ignore[attr-defined]
+            event=event,
+            mouse_module=_MouseStub,
+            keyboard_module=_KeyStub,
+            mouse_controller=mouse_controller,
+            keyboard_controller=keyboard_controller,
+        )
+    finally:
+        sr.resolve_smart_click_position = original  # type: ignore[assignment]
+
+    assert applied is True
+    assert mouse_controller.position == (44, 66)
+    assert mouse_controller.clicked is True
+
+
 def test_is_escape_key() -> None:
     class _Esc:
         def __str__(self) -> str:
