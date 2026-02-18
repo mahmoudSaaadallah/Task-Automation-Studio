@@ -4,6 +4,7 @@ from pathlib import Path
 
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
 from task_automation_studio.services.session_replay import (
+    _candidate_search_regions,
     _button_name_to_key,
     _event_time_ms,
     _is_escape_key,
@@ -11,8 +12,10 @@ from task_automation_studio.services.session_replay import (
     _locate_template_center,
     _modifier_name_to_key,
     _normalize_speed_factor,
+    _region_around_point,
     _resolve_template_click_position,
     _sleep_with_stop,
+    _window_titles_match,
     TeachSessionReplayer,
 )
 
@@ -139,6 +142,21 @@ def test_locate_template_center_missing_file() -> None:
     assert _locate_template_center("this-file-does-not-exist.png") is None
 
 
+def test_region_around_point() -> None:
+    assert _region_around_point(100, 80, 20) == (80, 60, 40, 40)
+
+
+def test_window_titles_match() -> None:
+    assert _window_titles_match("zoom", "Zoom Workplace") is True
+    assert _window_titles_match("excel", "chrome") is False
+
+
+def test_candidate_search_regions_include_nearby() -> None:
+    payload = {"x": 300, "y": 400}
+    regions = _candidate_search_regions(payload, dx=0, dy=0)
+    assert regions[0] == (160, 260, 280, 280)
+
+
 def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path) -> None:
     template = tmp_path / "click.png"
     template.write_bytes(b"dummy")
@@ -169,7 +187,7 @@ def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path)
     from task_automation_studio.services import session_replay as sr
 
     original = sr._locate_template_center
-    sr._locate_template_center = lambda _path: (50, 60)  # type: ignore[assignment]
+    sr._locate_template_center = lambda _path, region=None: (50, 60)  # type: ignore[assignment]
     try:
         applied = replayer._apply_event(  # type: ignore[attr-defined]
             event=event,
@@ -197,7 +215,9 @@ def test_resolve_template_click_position_with_candidates() -> None:
     from task_automation_studio.services import session_replay as sr
 
     original = sr._locate_template_center
-    sr._locate_template_center = lambda path: (200, 120) if path == "found-top.png" else None  # type: ignore[assignment]
+    sr._locate_template_center = (
+        lambda path, region=None: (200, 120) if path == "found-top.png" else None
+    )  # type: ignore[assignment]
     try:
         resolved = _resolve_template_click_position(payload)
     finally:

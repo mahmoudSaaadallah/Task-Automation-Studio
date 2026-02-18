@@ -9,6 +9,8 @@ from typing import Any
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
 from task_automation_studio.services.teach_sessions import TeachSessionService
 
+SEARCH_RADIUS_PX = 140
+
 
 def _normalize_speed_factor(value: float) -> float:
     if value <= 0:
@@ -35,7 +37,87 @@ def _sleep_with_stop(total_seconds: float, stop_event: threading.Event) -> bool:
     return not stop_event.is_set()
 
 
-def _locate_template_center(template_path: str) -> tuple[int, int] | None:
+def _safe_region(*, left: int, top: int, width: int, height: int) -> tuple[int, int, int, int] | None:
+    if width <= 0 or height <= 0:
+        return None
+    return max(0, left), max(0, top), width, height
+
+
+def _region_around_point(x: int, y: int, radius: int) -> tuple[int, int, int, int] | None:
+    left = x - radius
+    top = y - radius
+    return _safe_region(left=left, top=top, width=radius * 2, height=radius * 2)
+
+
+def _window_titles_match(recorded_title: str, active_title: str) -> bool:
+    left = recorded_title.strip().lower()
+    right = active_title.strip().lower()
+    if not left or not right:
+        return False
+    return left in right or right in left
+
+
+def _active_window_region(expected_title: str | None = None) -> tuple[int, int, int, int] | None:
+    try:
+        import pygetwindow as gw  # pylint: disable=import-outside-toplevel
+    except Exception:  # pragma: no cover - dependency/platform dependent
+        return None
+
+    try:
+        window = gw.getActiveWindow()
+    except Exception:  # pragma: no cover - OS/window-manager dependent
+        return None
+    if window is None:
+        return None
+
+    active_title = str(getattr(window, "title", "")).strip()
+    if expected_title and not _window_titles_match(expected_title, active_title):
+        return None
+
+    left = getattr(window, "left", None)
+    top = getattr(window, "top", None)
+    width = getattr(window, "width", None)
+    height = getattr(window, "height", None)
+    if not all(isinstance(value, int) for value in (left, top, width, height)):
+        return None
+    return _safe_region(left=left, top=top, width=width, height=height)
+
+
+def _candidate_search_regions(payload: dict[str, Any], *, dx: int, dy: int) -> list[tuple[int, int, int, int]]:
+    regions: list[tuple[int, int, int, int]] = []
+
+    x = payload.get("x")
+    y = payload.get("y")
+    if isinstance(x, int) and isinstance(y, int):
+        nearby = _region_around_point(x + dx, y + dy, SEARCH_RADIUS_PX)
+        if nearby is not None:
+            regions.append(nearby)
+
+    window_context = payload.get("window_context")
+    if isinstance(window_context, dict):
+        recorded_title = window_context.get("title")
+        expected_title = recorded_title if isinstance(recorded_title, str) else None
+        active_region = _active_window_region(expected_title=expected_title)
+        if active_region is not None:
+            regions.append(active_region)
+        else:
+            left = window_context.get("left")
+            top = window_context.get("top")
+            width = window_context.get("width")
+            height = window_context.get("height")
+            if all(isinstance(value, int) for value in (left, top, width, height)):
+                recorded_region = _safe_region(left=left, top=top, width=width, height=height)
+                if recorded_region is not None:
+                    regions.append(recorded_region)
+
+    unique_regions: list[tuple[int, int, int, int]] = []
+    for region in regions:
+        if region not in unique_regions:
+            unique_regions.append(region)
+    return unique_regions
+
+
+def _locate_template_center(template_path: str, *, region: tuple[int, int, int, int] | None = None) -> tuple[int, int] | None:
     path = Path(template_path)
     if not path.exists():
         return None
@@ -45,7 +127,10 @@ def _locate_template_center(template_path: str) -> tuple[int, int] | None:
         return None
 
     try:
-        box = pyautogui.locateOnScreen(str(path), grayscale=True)
+        if region is None:
+            box = pyautogui.locateOnScreen(str(path), grayscale=True)
+        else:
+            box = pyautogui.locateOnScreen(str(path), grayscale=True, region=region)
     except Exception:  # pragma: no cover - screen/env dependent
         return None
     if box is None:
@@ -68,16 +153,26 @@ def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int]
                 continue
             if not isinstance(dx, int) or not isinstance(dy, int):
                 continue
-            center = _locate_template_center(path)
-            if center is None:
-                continue
-            return center[0] - dx, center[1] - dy
+            regions = _candidate_search_regions(payload, dx=dx, dy=dy)
+            search_regions: list[tuple[int, int, int, int] | None] = list(regions)
+            if not search_regions:
+                search_regions = [None]
+            for region in search_regions:
+                center = _locate_template_center(path, region=region)
+                if center is None:
+                    continue
+                return center[0] - dx, center[1] - dy
 
     template_path = payload.get("template_path")
     if isinstance(template_path, str) and template_path:
-        center = _locate_template_center(template_path)
-        if center is not None:
-            return center
+        regions = _candidate_search_regions(payload, dx=0, dy=0)
+        search_regions: list[tuple[int, int, int, int] | None] = list(regions)
+        if not search_regions:
+            search_regions = [None]
+        for region in search_regions:
+            center = _locate_template_center(template_path, region=region)
+            if center is not None:
+                return center
     return None
 
 

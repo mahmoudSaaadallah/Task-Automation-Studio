@@ -133,6 +133,9 @@ class AutoTeachRecorder:
         event_id = uuid4().hex
         template_candidates = self._capture_click_templates(session_id=session_id, x=x, y=y, event_id=event_id)
         payload: dict[str, Any] = {"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()}
+        window_context = self._active_window_context()
+        if window_context is not None:
+            payload["window_context"] = window_context
         if template_candidates:
             payload["template_candidates"] = template_candidates
             for candidate in template_candidates:
@@ -257,3 +260,33 @@ class AutoTeachRecorder:
         except Exception:  # pragma: no cover - filesystem dependent
             return None
         return path
+
+    def _active_window_context(self) -> dict[str, object] | None:
+        try:
+            import pygetwindow as gw  # pylint: disable=import-outside-toplevel
+        except Exception:  # pragma: no cover - dependency/platform dependent
+            return None
+
+        try:
+            window = gw.getActiveWindow()
+        except Exception:  # pragma: no cover - OS/window-manager dependent
+            return None
+        if window is None:
+            return None
+
+        title = str(getattr(window, "title", "")).strip()
+        left = getattr(window, "left", None)
+        top = getattr(window, "top", None)
+        width = getattr(window, "width", None)
+        height = getattr(window, "height", None)
+
+        context: dict[str, object] = {}
+        if title:
+            context["title"] = title
+        if all(isinstance(value, int) for value in (left, top, width, height)):
+            if width > 0 and height > 0:
+                context["left"] = left
+                context["top"] = top
+                context["width"] = width
+                context["height"] = height
+        return context or None
