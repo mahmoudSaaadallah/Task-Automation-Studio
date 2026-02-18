@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
@@ -32,6 +33,26 @@ def _sleep_with_stop(total_seconds: float, stop_event: threading.Event) -> bool:
         time.sleep(chunk)
         remaining -= chunk
     return not stop_event.is_set()
+
+
+def _locate_template_center(template_path: str) -> tuple[int, int] | None:
+    path = Path(template_path)
+    if not path.exists():
+        return None
+    try:
+        import pyautogui  # pylint: disable=import-outside-toplevel
+    except Exception:  # pragma: no cover - dependency/platform dependent
+        return None
+
+    try:
+        box = pyautogui.locateOnScreen(str(path), grayscale=True)
+    except Exception:  # pragma: no cover - screen/env dependent
+        return None
+    if box is None:
+        return None
+
+    center = pyautogui.center(box)
+    return int(center.x), int(center.y)
 
 
 def _event_time_ms(event: TeachEventData) -> int:
@@ -182,6 +203,13 @@ class TeachSessionReplayer:
             x = event.payload.get("x")
             y = event.payload.get("y")
             button_name = str(event.payload.get("button", "left"))
+
+            template_path = event.payload.get("template_path")
+            if isinstance(template_path, str) and template_path:
+                center = _locate_template_center(template_path)
+                if center is not None:
+                    x, y = center
+
             if isinstance(x, int) and isinstance(y, int):
                 mouse_controller.position = (x, y)
             mouse_controller.click(_button_name_to_key(button_name, mouse_module), 1)

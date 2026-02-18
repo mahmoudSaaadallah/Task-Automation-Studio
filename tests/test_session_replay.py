@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import threading
+from pathlib import Path
 
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
 from task_automation_studio.services.session_replay import (
@@ -7,6 +8,7 @@ from task_automation_studio.services.session_replay import (
     _event_time_ms,
     _is_escape_key,
     _key_name_to_key,
+    _locate_template_center,
     _modifier_name_to_key,
     _normalize_speed_factor,
     _sleep_with_stop,
@@ -130,3 +132,54 @@ def test_sleep_with_stop() -> None:
     stop = threading.Event()
     stop.set()
     assert _sleep_with_stop(0.5, stop) is False
+
+
+def test_locate_template_center_missing_file() -> None:
+    assert _locate_template_center("this-file-does-not-exist.png") is None
+
+
+def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path) -> None:
+    template = tmp_path / "click.png"
+    template.write_bytes(b"dummy")
+    event = TeachEventData(
+        event_id="e_click",
+        event_type=TeachEventType.MOUSE_CLICK,
+        payload={"x": 1, "y": 2, "button": "left", "template_path": str(template)},
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    class _MouseControllerCapture(_MouseControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.clicked = False
+
+        def click(self, *_args):  # type: ignore[no-untyped-def]
+            self.clicked = True
+            return None
+
+    class _DummyService:
+        pass
+
+    keyboard_controller = _KeyboardControllerStub()
+    mouse_controller = _MouseControllerCapture()
+    replayer = TeachSessionReplayer(session_service=_DummyService())  # type: ignore[arg-type]
+
+    # monkeypatch-like inline override to avoid real screen lookup dependency
+    from task_automation_studio.services import session_replay as sr
+
+    original = sr._locate_template_center
+    sr._locate_template_center = lambda _path: (50, 60)  # type: ignore[assignment]
+    try:
+        applied = replayer._apply_event(  # type: ignore[attr-defined]
+            event=event,
+            mouse_module=_MouseStub,
+            keyboard_module=_KeyStub,
+            mouse_controller=mouse_controller,
+            keyboard_controller=keyboard_controller,
+        )
+    finally:
+        sr._locate_template_center = original  # type: ignore[assignment]
+
+    assert applied is True
+    assert mouse_controller.position == (50, 60)
+    assert mouse_controller.clicked is True

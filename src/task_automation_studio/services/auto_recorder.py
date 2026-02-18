@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any
+from pathlib import Path
+from uuid import uuid4
 
 from task_automation_studio.core.teach_models import TeachEventType
 from task_automation_studio.services.teach_sessions import TeachSessionService
@@ -120,10 +122,16 @@ class AutoTeachRecorder:
         session_id = self._session_id
         if not session_id:
             return
+        event_id = uuid4().hex
+        template_path = self._capture_click_template(session_id=session_id, x=x, y=y, event_id=event_id)
+        payload: dict[str, Any] = {"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()}
+        if template_path is not None:
+            payload["template_path"] = str(template_path)
         self._service.add_event(
             session_id=session_id,
             event_type=TeachEventType.MOUSE_CLICK,
-            payload={"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()},
+            payload=payload,
+            event_id=event_id,
             sensitive=False,
         )
 
@@ -194,3 +202,30 @@ class AutoTeachRecorder:
             self._pressed_modifiers.discard(modifier_name)
             return
         self._pressed_keys.discard(key_name)
+
+    def _capture_click_template(self, *, session_id: str, x: int, y: int, event_id: str) -> Path | None:
+        try:
+            from PIL import ImageGrab  # pylint: disable=import-outside-toplevel
+        except Exception:  # pragma: no cover - dependency/platform dependent
+            return None
+
+        artifact_root = self._service.artifacts_dir() / "click_templates" / session_id
+        artifact_root.mkdir(parents=True, exist_ok=True)
+
+        half_size = 24
+        left = max(0, x - half_size)
+        top = max(0, y - half_size)
+        right = max(left + 1, x + half_size)
+        bottom = max(top + 1, y + half_size)
+
+        try:
+            image = ImageGrab.grab(bbox=(left, top, right, bottom))
+        except Exception:  # pragma: no cover - OS/screen dependent
+            return None
+
+        path = artifact_root / f"{event_id}.png"
+        try:
+            image.save(path)
+        except Exception:  # pragma: no cover - filesystem dependent
+            return None
+        return path
