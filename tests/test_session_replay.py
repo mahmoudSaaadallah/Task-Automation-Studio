@@ -13,6 +13,7 @@ from task_automation_studio.services.session_replay import (
     _locate_template_center,
     _modifier_name_to_key,
     _normalize_speed_factor,
+    _pick_best_center,
     _region_around_point,
     _resolve_template_click_position,
     _single_unique_center,
@@ -169,6 +170,18 @@ def test_single_unique_center() -> None:
     assert _single_unique_center([(12, 20), (13, 20)]) is None
 
 
+def test_pick_best_center_uses_expected_point() -> None:
+    centers = [(300, 100), (112, 92), (500, 200)]
+    picked = _pick_best_center(centers, expected_point=(100, 100), max_distance_px=120, min_gap_px=18)
+    assert picked == (112, 92)
+
+
+def test_pick_best_center_rejects_ambiguous() -> None:
+    centers = [(100, 100), (108, 106)]
+    picked = _pick_best_center(centers, expected_point=(102, 102), max_distance_px=120, min_gap_px=18)
+    assert picked is None
+
+
 def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path) -> None:
     template = tmp_path / "click.png"
     template.write_bytes(b"dummy")
@@ -199,7 +212,7 @@ def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path)
     from task_automation_studio.services import session_replay as sr
 
     original = sr._locate_template_center
-    sr._locate_template_center = lambda _path, region=None: (50, 60)  # type: ignore[assignment]
+    sr._locate_template_center = lambda _path, region=None, expected_point=None: (50, 60)  # type: ignore[assignment]
     try:
         applied = replayer._apply_event(  # type: ignore[attr-defined]
             event=event,
@@ -245,7 +258,7 @@ def test_apply_mouse_click_with_template_skips_if_unresolved(tmp_path: Path) -> 
     from task_automation_studio.services import session_replay as sr
 
     original = sr._locate_template_center
-    sr._locate_template_center = lambda _path, region=None: None  # type: ignore[assignment]
+    sr._locate_template_center = lambda _path, region=None, expected_point=None: None  # type: ignore[assignment]
     try:
         applied = replayer._apply_event(  # type: ignore[attr-defined]
             event=event,
@@ -273,7 +286,7 @@ def test_resolve_template_click_position_with_candidates() -> None:
 
     original = sr._locate_template_center
     sr._locate_template_center = (
-        lambda path, region=None: (200, 120) if path == "found-top.png" else None
+        lambda path, region=None, expected_point=None: (200, 120) if path == "found-top.png" else None
     )  # type: ignore[assignment]
     try:
         resolved = _resolve_template_click_position(payload)

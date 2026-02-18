@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -12,6 +13,10 @@ from task_automation_studio.services.teach_sessions import TeachSessionService
 SEARCH_RADIUS_PX = 140
 TEMPLATE_MATCH_CONFIDENCE = 0.92
 TEMPLATE_DEDUP_DISTANCE_PX = 10
+TEMPLATE_EXPECTED_MAX_DISTANCE_PX = 110
+TEMPLATE_EXPECTED_MIN_GAP_PX = 18
+
+LOGGER = logging.getLogger("task_automation_studio")
 
 
 def _normalize_speed_factor(value: float) -> float:
@@ -165,9 +170,42 @@ def _single_unique_center(centers: list[tuple[int, int]]) -> tuple[int, int] | N
     return centers[0]
 
 
-def _locate_template_center(template_path: str, *, region: tuple[int, int, int, int] | None = None) -> tuple[int, int] | None:
+def _pick_best_center(
+    centers: list[tuple[int, int]],
+    *,
+    expected_point: tuple[int, int] | None,
+    max_distance_px: int = TEMPLATE_EXPECTED_MAX_DISTANCE_PX,
+    min_gap_px: int = TEMPLATE_EXPECTED_MIN_GAP_PX,
+) -> tuple[int, int] | None:
+    unique_center = _single_unique_center(centers)
+    if unique_center is not None:
+        return unique_center
+    if not centers or expected_point is None:
+        return None
+
+    ex, ey = expected_point
+    ranked = sorted(centers, key=lambda center: (center[0] - ex) ** 2 + (center[1] - ey) ** 2)
+    nearest = ranked[0]
+    nearest_distance_sq = (nearest[0] - ex) ** 2 + (nearest[1] - ey) ** 2
+    if nearest_distance_sq > max_distance_px * max_distance_px:
+        return None
+
+    if len(ranked) > 1:
+        second = ranked[1]
+        second_distance_sq = (second[0] - ex) ** 2 + (second[1] - ey) ** 2
+        if second_distance_sq - nearest_distance_sq < min_gap_px * min_gap_px:
+            return None
+    return nearest
+
+
+def _locate_template_center(
+    template_path: str,
+    *,
+    region: tuple[int, int, int, int] | None = None,
+    expected_point: tuple[int, int] | None = None,
+) -> tuple[int, int] | None:
     centers = _locate_template_centers(template_path, region=region, confidence=TEMPLATE_MATCH_CONFIDENCE)
-    return _single_unique_center(centers)
+    return _pick_best_center(centers, expected_point=expected_point)
 
 
 def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int] | None:
@@ -183,24 +221,34 @@ def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int]
                 continue
             if not isinstance(dx, int) or not isinstance(dy, int):
                 continue
+            raw_x = payload.get("x")
+            raw_y = payload.get("y")
+            expected_point: tuple[int, int] | None = None
+            if isinstance(raw_x, int) and isinstance(raw_y, int):
+                expected_point = (raw_x + dx, raw_y + dy)
             regions = _candidate_search_regions(payload, dx=dx, dy=dy)
             search_regions: list[tuple[int, int, int, int] | None] = list(regions)
             if not search_regions:
                 search_regions = [None]
             for region in search_regions:
-                center = _locate_template_center(path, region=region)
+                center = _locate_template_center(path, region=region, expected_point=expected_point)
                 if center is None:
                     continue
                 return center[0] - dx, center[1] - dy
 
     template_path = payload.get("template_path")
     if isinstance(template_path, str) and template_path:
+        raw_x = payload.get("x")
+        raw_y = payload.get("y")
+        expected_point: tuple[int, int] | None = None
+        if isinstance(raw_x, int) and isinstance(raw_y, int):
+            expected_point = (raw_x, raw_y)
         regions = _candidate_search_regions(payload, dx=0, dy=0)
         search_regions: list[tuple[int, int, int, int] | None] = list(regions)
         if not search_regions:
             search_regions = [None]
         for region in search_regions:
-            center = _locate_template_center(template_path, region=region)
+            center = _locate_template_center(template_path, region=region, expected_point=expected_point)
             if center is not None:
                 return center
     return None
@@ -360,6 +408,7 @@ class TeachSessionReplayer:
                 x, y = resolved_position
             elif "template_candidates" in event.payload or "template_path" in event.payload:
                 # Template-based events should never fall back to blind absolute coordinates.
+                LOGGER.warning("Replay skipped mouse_click event_id=%s: unresolved template match", event.event_id)
                 return False
 
             if isinstance(x, int) and isinstance(y, int):
