@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from task_automation_studio.workflows.loader import load_workflow_from_json
+from task_automation_studio.workflows.loader import load_workflow_from_json, summarize_workflow
 
 
 def test_load_workflow_from_json_maps_step_types(tmp_path: Path) -> None:
@@ -43,3 +43,17 @@ def test_load_workflow_from_json_rejects_unknown_type(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unsupported step type"):
         load_workflow_from_json(workflow_file)
+
+
+def test_summarize_workflow(tmp_path: Path) -> None:
+    workflow_file = tmp_path / "workflow.json"
+    payload = {
+        "workflow_id": "wf_summary",
+        "name": "Summary Workflow",
+        "steps": [{"id": "s1", "type": "open_url", "params": {"url": "https://example.com"}}],
+    }
+    workflow_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = summarize_workflow(workflow_file)
+    assert summary["workflow_id"] == "wf_summary"
+    assert summary["steps_count"] == 1

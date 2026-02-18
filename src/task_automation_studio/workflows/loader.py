@@ -39,6 +39,17 @@ def load_workflow_from_json(path: str | Path) -> WorkflowDefinition:
     return WorkflowDefinition(workflow_id=workflow_id, name=name, steps=steps)
 
 
+def summarize_workflow(path: str | Path) -> dict[str, object]:
+    workflow = load_workflow_from_json(path)
+    actions = sorted({step.action for step in workflow.steps})
+    return {
+        "workflow_id": workflow.workflow_id,
+        "name": workflow.name,
+        "steps_count": len(workflow.steps),
+        "actions": actions,
+    }
+
+
 def _build_step(step_raw: dict[str, Any], index: int) -> StepDefinition:
     step_id = str(step_raw.get("id", "")).strip()
     if not step_id:

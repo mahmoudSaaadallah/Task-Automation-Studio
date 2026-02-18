@@ -7,6 +7,7 @@ import logging
 from task_automation_studio.config.settings import Settings
 from task_automation_studio.core.teach_models import TeachEventType
 from task_automation_studio.utils.logging_config import configure_logging
+from task_automation_studio.workflows.loader import summarize_workflow
 from task_automation_studio.workflows.registry import list_available_workflows, load_workflow_from_source
 
 
@@ -75,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     teach_compile.add_argument("--output-file", required=True, help="Output workflow JSON path.")
 
     teach_sub.add_parser("list", help="List teach sessions.")
+
+    workflow_parser = subparsers.add_parser("workflow", help="Workflow utility commands.")
+    workflow_sub = workflow_parser.add_subparsers(dest="workflow_command", required=True)
+    workflow_validate = workflow_sub.add_parser("validate", help="Validate workflow JSON and print summary.")
+    workflow_validate.add_argument("--workflow-file", required=True, help="Path to workflow JSON file.")
     return parser
 
 
@@ -184,6 +190,16 @@ def main() -> int:
         if args.teach_command == "list":
             sessions = service.list_sessions()
             print([session.model_dump(mode="json") for session in sessions])
+            return 0
+
+    if args.command == "workflow":
+        if args.workflow_command == "validate":
+            try:
+                summary = summarize_workflow(args.workflow_file)
+            except Exception as exc:
+                logger.error("Workflow validation failed: %s", exc)
+                return 2
+            print(summary)
             return 0
 
     logger.info("No command provided. Use '--ui' or 'run'.")

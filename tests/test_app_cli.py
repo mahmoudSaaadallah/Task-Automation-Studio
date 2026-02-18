@@ -27,3 +27,10 @@ def test_parse_payload_pairs() -> None:
     payload = _parse_payload_pairs(["selector=input[name=email]", "value={{record.email}}"])
     assert payload["selector"] == "input[name=email]"
     assert payload["value"] == "{{record.email}}"
+
+
+def test_parser_supports_workflow_validate() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["workflow", "validate", "--workflow-file", "x.json"])
+    assert args.command == "workflow"
+    assert args.workflow_command == "validate"

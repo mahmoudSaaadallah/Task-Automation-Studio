@@ -38,6 +38,7 @@ tas run --workflow zoom_signup --input-file data/employees.xlsx --live-run \
 Run from a workflow JSON file:
 ```bash
 tas run --workflow-file docs/design/examples/zoom_signup.workflow.json --input-file data/employees.xlsx --dry-run
+tas workflow validate --workflow-file docs/design/examples/zoom_signup.workflow.json
 ```
 
 Teach session basics:
