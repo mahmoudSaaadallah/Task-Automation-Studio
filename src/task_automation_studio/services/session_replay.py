@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -8,10 +9,12 @@ from typing import Any
 from task_automation_studio.core.agent_models import AgentGoal, AgentGoalType, AgentState, SkillDescriptor
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
 from task_automation_studio.services.agent_planner import GoalPlanner
-from task_automation_studio.services.agent_runtime import AgentRuntime
+from task_automation_studio.services.agent_runtime import AgentRunSummary, AgentRuntime
 from task_automation_studio.services.agent_skills import AgentSkillRegistry
 from task_automation_studio.services.smart_locator import resolve_smart_click_position
 from task_automation_studio.services.teach_sessions import TeachSessionService
+
+LOGGER = logging.getLogger("task_automation_studio")
 
 
 def _normalize_speed_factor(value: float) -> float:
@@ -212,35 +215,18 @@ class TeachSessionReplayer:
             return True
 
         if event.event_type == TeachEventType.KEY_PRESS:
-            key_name = str(event.payload.get("key", "")).lower()
-            if not key_name or key_name == "esc":
-                return False
-            key = _key_name_to_key(key_name, keyboard_module)
-            keyboard_controller.press(key)
-            keyboard_controller.release(key)
-            return True
+            return self._run_key_press_agent(
+                event=event,
+                keyboard_module=keyboard_module,
+                keyboard_controller=keyboard_controller,
+            )
 
         if event.event_type == TeachEventType.HOTKEY:
-            key_name = str(event.payload.get("key", "")).lower()
-            modifiers_payload = event.payload.get("modifiers", [])
-            if not key_name or not isinstance(modifiers_payload, list):
-                return False
-
-            pressed_modifiers: list[Any] = []
-            for modifier_name in [str(item).lower() for item in modifiers_payload]:
-                modifier_key = _modifier_name_to_key(modifier_name, keyboard_module)
-                if modifier_key is None:
-                    continue
-                keyboard_controller.press(modifier_key)
-                pressed_modifiers.append(modifier_key)
-
-            target_key = _key_name_to_key(key_name, keyboard_module)
-            keyboard_controller.press(target_key)
-            keyboard_controller.release(target_key)
-
-            for modifier_key in reversed(pressed_modifiers):
-                keyboard_controller.release(modifier_key)
-            return True
+            return self._run_hotkey_agent(
+                event=event,
+                keyboard_module=keyboard_module,
+                keyboard_controller=keyboard_controller,
+            )
 
         return False
 
@@ -345,8 +331,245 @@ class TeachSessionReplayer:
             success_criteria=["click_verified"],
         )
 
+        return self._execute_agent_goal(event=event, goal=goal, registry=registry)
+
+    def _run_key_press_agent(self, *, event: TeachEventData, keyboard_module: Any, keyboard_controller: Any) -> bool:
+        registry = AgentSkillRegistry()
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_locate_key_press",
+                name="Locate key press input",
+                supported_intents=["locate_target"],
+                required_inputs=["key_name"],
+                default_success_signals=["key_resolved"],
+                reliability_score=0.9,
+            )
+        )
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_apply_key_press",
+                name="Apply key press",
+                supported_intents=["apply_action"],
+                required_inputs=["key_name"],
+                default_success_signals=["key_applied"],
+                reliability_score=0.92,
+            )
+        )
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_verify_key_press",
+                name="Verify key press",
+                supported_intents=["verify_outcome"],
+                required_inputs=[],
+                default_success_signals=["key_verified"],
+                reliability_score=0.85,
+            )
+        )
+
+        def _locate_handler(**kwargs):  # type: ignore[no-untyped-def]
+            step = kwargs["step"]
+            state = kwargs["state"]
+            key_name = str(step.input_bindings.get("key_name", "")).lower().strip()
+            if not key_name or key_name == "esc":
+                return {"success": False, "verified": False, "message": "Invalid key_name for replay.", "signals": []}
+            state.variables["key_name"] = key_name
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Key resolved.",
+                "signals": ["key_resolved"],
+                "state_updates": {"key_name": key_name},
+                "evidence": {"key_name": key_name},
+            }
+
+        def _apply_handler(**kwargs):  # type: ignore[no-untyped-def]
+            state = kwargs["state"]
+            key_name = str(state.variables.get("key_name", "")).lower().strip()
+            if not key_name:
+                return {"success": False, "verified": False, "message": "Missing key_name in state.", "signals": []}
+            key = _key_name_to_key(key_name, keyboard_module)
+            keyboard_controller.press(key)
+            keyboard_controller.release(key)
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Key press applied.",
+                "signals": ["key_applied"],
+                "state_updates": {"key_applied": True},
+                "evidence": {"key_name": key_name},
+            }
+
+        def _verify_handler(**kwargs):  # type: ignore[no-untyped-def]
+            state = kwargs["state"]
+            applied = bool(state.variables.get("key_applied", False))
+            if not applied:
+                return {"success": False, "verified": False, "message": "Key was not applied.", "signals": []}
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Key press verified.",
+                "signals": ["key_verified"],
+                "evidence": {"key_name": state.variables.get("key_name")},
+            }
+
+        registry.register_handler(skill_id="ui_locate_key_press", handler=_locate_handler)
+        registry.register_handler(skill_id="ui_apply_key_press", handler=_apply_handler)
+        registry.register_handler(skill_id="ui_verify_key_press", handler=_verify_handler)
+
+        key_name = str(event.payload.get("key", "")).lower().strip()
+        goal = AgentGoal(
+            goal_id=event.event_id,
+            name="Replay key press",
+            goal_type=AgentGoalType.REPETITIVE_TASK,
+            requested_intents=["locate_target", "apply_action", "verify_outcome"],
+            inputs={"key_name": key_name},
+            success_criteria=["key_verified"],
+        )
+        return self._execute_agent_goal(event=event, goal=goal, registry=registry)
+
+    def _run_hotkey_agent(self, *, event: TeachEventData, keyboard_module: Any, keyboard_controller: Any) -> bool:
+        registry = AgentSkillRegistry()
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_locate_hotkey",
+                name="Locate hotkey input",
+                supported_intents=["locate_target"],
+                required_inputs=["key_name", "modifiers"],
+                default_success_signals=["hotkey_resolved"],
+                reliability_score=0.9,
+            )
+        )
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_apply_hotkey",
+                name="Apply hotkey",
+                supported_intents=["apply_action"],
+                required_inputs=["key_name", "modifiers"],
+                default_success_signals=["hotkey_applied"],
+                reliability_score=0.92,
+            )
+        )
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_verify_hotkey",
+                name="Verify hotkey",
+                supported_intents=["verify_outcome"],
+                required_inputs=[],
+                default_success_signals=["hotkey_verified"],
+                reliability_score=0.85,
+            )
+        )
+
+        def _locate_handler(**kwargs):  # type: ignore[no-untyped-def]
+            step = kwargs["step"]
+            state = kwargs["state"]
+            key_name = str(step.input_bindings.get("key_name", "")).lower().strip()
+            modifiers_value = step.input_bindings.get("modifiers", [])
+            if not key_name or key_name == "esc" or not isinstance(modifiers_value, list):
+                return {"success": False, "verified": False, "message": "Invalid hotkey payload.", "signals": []}
+            modifiers = [str(item).lower().strip() for item in modifiers_value if str(item).strip()]
+            state.variables["hotkey_key_name"] = key_name
+            state.variables["hotkey_modifiers"] = modifiers
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Hotkey resolved.",
+                "signals": ["hotkey_resolved"],
+                "state_updates": {"hotkey_key_name": key_name, "hotkey_modifiers": modifiers},
+                "evidence": {"key_name": key_name, "modifiers": modifiers},
+            }
+
+        def _apply_handler(**kwargs):  # type: ignore[no-untyped-def]
+            state = kwargs["state"]
+            key_name = str(state.variables.get("hotkey_key_name", "")).lower().strip()
+            modifiers = state.variables.get("hotkey_modifiers", [])
+            if not key_name or not isinstance(modifiers, list):
+                return {"success": False, "verified": False, "message": "Missing hotkey state.", "signals": []}
+
+            pressed_modifiers: list[Any] = []
+            for modifier_name in [str(item).lower() for item in modifiers]:
+                modifier_key = _modifier_name_to_key(modifier_name, keyboard_module)
+                if modifier_key is None:
+                    continue
+                keyboard_controller.press(modifier_key)
+                pressed_modifiers.append(modifier_key)
+
+            target_key = _key_name_to_key(key_name, keyboard_module)
+            keyboard_controller.press(target_key)
+            keyboard_controller.release(target_key)
+            for modifier_key in reversed(pressed_modifiers):
+                keyboard_controller.release(modifier_key)
+
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Hotkey applied.",
+                "signals": ["hotkey_applied"],
+                "state_updates": {"hotkey_applied": True},
+                "evidence": {"key_name": key_name, "modifiers_used": [str(item) for item in pressed_modifiers]},
+            }
+
+        def _verify_handler(**kwargs):  # type: ignore[no-untyped-def]
+            state = kwargs["state"]
+            if not bool(state.variables.get("hotkey_applied", False)):
+                return {"success": False, "verified": False, "message": "Hotkey was not applied.", "signals": []}
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Hotkey verified.",
+                "signals": ["hotkey_verified"],
+                "evidence": {
+                    "key_name": state.variables.get("hotkey_key_name"),
+                    "modifiers": state.variables.get("hotkey_modifiers", []),
+                },
+            }
+
+        registry.register_handler(skill_id="ui_locate_hotkey", handler=_locate_handler)
+        registry.register_handler(skill_id="ui_apply_hotkey", handler=_apply_handler)
+        registry.register_handler(skill_id="ui_verify_hotkey", handler=_verify_handler)
+
+        key_name = str(event.payload.get("key", "")).lower().strip()
+        modifiers_payload = event.payload.get("modifiers", [])
+        goal = AgentGoal(
+            goal_id=event.event_id,
+            name="Replay hotkey",
+            goal_type=AgentGoalType.REPETITIVE_TASK,
+            requested_intents=["locate_target", "apply_action", "verify_outcome"],
+            inputs={"key_name": key_name, "modifiers": modifiers_payload},
+            success_criteria=["hotkey_verified"],
+        )
+        return self._execute_agent_goal(event=event, goal=goal, registry=registry)
+
+    def _execute_agent_goal(self, *, event: TeachEventData, goal: AgentGoal, registry: AgentSkillRegistry) -> bool:
         planner = GoalPlanner(skill_registry=registry)
         plan = planner.build_plan(goal=goal, state=AgentState())
         runtime = AgentRuntime(skills=registry)
         summary = runtime.run(goal=goal, plan=plan, state=AgentState())
+        self._log_agent_summary(event=event, summary=summary)
         return summary.completed
+
+    def _log_agent_summary(self, *, event: TeachEventData, summary: AgentRunSummary) -> None:
+        level = logging.INFO if summary.completed else logging.WARNING
+        LOGGER.log(
+            level,
+            "Replay agent result event_id=%s event_type=%s completed=%s failed_step=%s traces=%s",
+            event.event_id,
+            event.event_type.value,
+            summary.completed,
+            summary.failed_step_id,
+            len(summary.traces),
+        )
+        for trace in summary.traces:
+            trace_level = logging.DEBUG if trace.verified else logging.WARNING
+            LOGGER.log(
+                trace_level,
+                "Replay agent trace event_id=%s step=%s intent=%s skill=%s attempt=%s verified=%s message=%s evidence=%s",
+                event.event_id,
+                trace.step_id,
+                trace.intent,
+                trace.selected_skill_id,
+                trace.attempt,
+                trace.verified,
+                trace.message,
+                trace.evidence,
+            )

@@ -112,6 +112,50 @@ def test_apply_hotkey_event() -> None:
     ]
 
 
+def test_apply_key_press_event() -> None:
+    event = TeachEventData(
+        event_id="e_key",
+        event_type=TeachEventType.KEY_PRESS,
+        payload={"key": "a"},
+        timestamp=datetime.now(timezone.utc),
+    )
+    keyboard_controller = _KeyboardControllerStub()
+    mouse_controller = _MouseControllerStub()
+    replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
+
+    applied = replayer._apply_event(  # type: ignore[attr-defined]
+        event=event,
+        mouse_module=_MouseStub,
+        keyboard_module=_KeyStub,
+        mouse_controller=mouse_controller,
+        keyboard_controller=keyboard_controller,
+    )
+    assert applied is True
+    assert keyboard_controller.actions == [("press", "a"), ("release", "a")]
+
+
+def test_apply_key_press_event_rejects_escape() -> None:
+    event = TeachEventData(
+        event_id="e_key_esc",
+        event_type=TeachEventType.KEY_PRESS,
+        payload={"key": "esc"},
+        timestamp=datetime.now(timezone.utc),
+    )
+    keyboard_controller = _KeyboardControllerStub()
+    mouse_controller = _MouseControllerStub()
+    replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
+
+    applied = replayer._apply_event(  # type: ignore[attr-defined]
+        event=event,
+        mouse_module=_MouseStub,
+        keyboard_module=_KeyStub,
+        mouse_controller=mouse_controller,
+        keyboard_controller=keyboard_controller,
+    )
+    assert applied is False
+    assert keyboard_controller.actions == []
+
+
 def test_apply_mouse_click_prefers_smart_locator() -> None:
     event = TeachEventData(
         event_id="e_click",
@@ -186,6 +230,28 @@ def test_apply_mouse_click_fails_without_target() -> None:
 
 def test_resolve_click_target_fallback_to_coordinates() -> None:
     assert _resolve_click_target({"x": 12, "y": 99}) == (12, 99)
+
+
+def test_apply_hotkey_event_invalid_payload() -> None:
+    event = TeachEventData(
+        event_id="e_hotkey_bad",
+        event_type=TeachEventType.HOTKEY,
+        payload={"key": "v", "modifiers": "ctrl"},
+        timestamp=datetime.now(timezone.utc),
+    )
+    keyboard_controller = _KeyboardControllerStub()
+    mouse_controller = _MouseControllerStub()
+    replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
+
+    applied = replayer._apply_event(  # type: ignore[attr-defined]
+        event=event,
+        mouse_module=_MouseStub,
+        keyboard_module=_KeyStub,
+        mouse_controller=mouse_controller,
+        keyboard_controller=keyboard_controller,
+    )
+    assert applied is False
+    assert keyboard_controller.actions == []
 
 
 def test_is_escape_key() -> None:
