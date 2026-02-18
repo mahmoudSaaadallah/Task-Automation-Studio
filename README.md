@@ -59,6 +59,10 @@ tas teach compile --session-id <SESSION_ID> --workflow-id employee_signup_v1 --o
 tas teach replay --session-id <SESSION_ID> --speed-factor 1.0
 ```
 
+Replay stop:
+- Press `Esc` during replay to stop immediately.
+- Replay summary now includes `stopped_by_user`.
+
 Shortcut note:
 - Keyboard shortcuts (for example `Ctrl+V`, `Ctrl+C`, `Alt+Tab`) are recorded and replayed as hotkeys.
 - For sessions recorded before this fix, re-recording is recommended.
