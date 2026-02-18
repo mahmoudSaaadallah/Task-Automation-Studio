@@ -556,7 +556,34 @@ class TeachSessionTab(QWidget):
             QMessageBox.critical(self, "Replay Failed", str(exc))
             return
         self._restore_host_window()
-        self.result_output.setPlainText(json.dumps(summary.to_dict(), indent=2))
+        self.result_output.setPlainText(self._format_replay_summary(summary.to_dict()))
+
+    def _format_replay_summary(self, payload: dict[str, object]) -> str:
+        diagnostics_raw = payload.get("diagnostics", [])
+        diagnostics: list[dict[str, object]] = []
+        if isinstance(diagnostics_raw, list):
+            diagnostics = [item for item in diagnostics_raw if isinstance(item, dict)]
+
+        failed = [item for item in diagnostics if not bool(item.get("applied", False))]
+        summary_block: dict[str, object] = {
+            "session_id": payload.get("session_id"),
+            "replayed_events": payload.get("replayed_events"),
+            "skipped_events": payload.get("skipped_events"),
+            "speed_factor": payload.get("speed_factor"),
+            "stopped_by_user": payload.get("stopped_by_user"),
+            "failed_event_count": len(failed),
+        }
+
+        preview_limit = 20
+        failed_preview = failed[:preview_limit]
+        output: dict[str, object] = {
+            "summary": summary_block,
+            "failed_events_preview": failed_preview,
+        }
+        remaining = len(failed) - len(failed_preview)
+        if remaining > 0:
+            output["failed_events_remaining"] = remaining
+        return json.dumps(output, indent=2)
 
     def _minimize_host_window(self) -> None:
         host = self.window()

@@ -3,6 +3,7 @@ import threading
 
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
 from task_automation_studio.services.session_replay import (
+    ReplaySummary,
     _button_name_to_key,
     _event_time_ms,
     _is_escape_key,
@@ -273,3 +274,18 @@ def test_sleep_with_stop() -> None:
     stop = threading.Event()
     stop.set()
     assert _sleep_with_stop(0.5, stop) is False
+
+
+def test_replay_summary_to_dict_includes_diagnostics() -> None:
+    summary = ReplaySummary(
+        session_id="s1",
+        replayed_events=2,
+        skipped_events=1,
+        speed_factor=1.0,
+        stopped_by_user=False,
+        diagnostics=[{"event_id": "e1", "applied": False, "reason": "agent_failed", "details": {}}],
+    )
+    payload = summary.to_dict()
+    assert payload["session_id"] == "s1"
+    assert isinstance(payload["diagnostics"], list)
+    assert payload["diagnostics"][0]["reason"] == "agent_failed"
