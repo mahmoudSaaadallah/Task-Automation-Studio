@@ -55,6 +55,32 @@ def _locate_template_center(template_path: str) -> tuple[int, int] | None:
     return int(center.x), int(center.y)
 
 
+def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int] | None:
+    candidates = payload.get("template_candidates")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            path = candidate.get("path")
+            dx = candidate.get("dx")
+            dy = candidate.get("dy")
+            if not isinstance(path, str) or not path:
+                continue
+            if not isinstance(dx, int) or not isinstance(dy, int):
+                continue
+            center = _locate_template_center(path)
+            if center is None:
+                continue
+            return center[0] - dx, center[1] - dy
+
+    template_path = payload.get("template_path")
+    if isinstance(template_path, str) and template_path:
+        center = _locate_template_center(template_path)
+        if center is not None:
+            return center
+    return None
+
+
 def _event_time_ms(event: TeachEventData) -> int:
     payload_time = event.payload.get("t_ms")
     if isinstance(payload_time, int):
@@ -204,11 +230,9 @@ class TeachSessionReplayer:
             y = event.payload.get("y")
             button_name = str(event.payload.get("button", "left"))
 
-            template_path = event.payload.get("template_path")
-            if isinstance(template_path, str) and template_path:
-                center = _locate_template_center(template_path)
-                if center is not None:
-                    x, y = center
+            resolved_position = _resolve_template_click_position(event.payload)
+            if resolved_position is not None:
+                x, y = resolved_position
 
             if isinstance(x, int) and isinstance(y, int):
                 mouse_controller.position = (x, y)

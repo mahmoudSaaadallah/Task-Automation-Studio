@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 import threading
 import time
 from typing import Any
-from pathlib import Path
 from uuid import uuid4
 
 from task_automation_studio.core.teach_models import TeachEventType
@@ -11,6 +11,14 @@ from task_automation_studio.services.teach_sessions import TeachSessionService
 
 
 MODIFIER_NAMES = {"ctrl", "alt", "shift", "cmd"}
+CLICK_TEMPLATE_HALF_SIZE = 24
+CLICK_TEMPLATE_CANDIDATE_OFFSETS: tuple[tuple[int, int], ...] = (
+    (0, 0),
+    (0, -28),
+    (-28, 0),
+    (28, 0),
+    (0, 28),
+)
 
 
 def _button_to_name(button: Any) -> str:
@@ -123,10 +131,14 @@ class AutoTeachRecorder:
         if not session_id:
             return
         event_id = uuid4().hex
-        template_path = self._capture_click_template(session_id=session_id, x=x, y=y, event_id=event_id)
+        template_candidates = self._capture_click_templates(session_id=session_id, x=x, y=y, event_id=event_id)
         payload: dict[str, Any] = {"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()}
-        if template_path is not None:
-            payload["template_path"] = str(template_path)
+        if template_candidates:
+            payload["template_candidates"] = template_candidates
+            for candidate in template_candidates:
+                if candidate.get("dx") == 0 and candidate.get("dy") == 0:
+                    payload["template_path"] = candidate.get("path")
+                    break
         self._service.add_event(
             session_id=session_id,
             event_type=TeachEventType.MOUSE_CLICK,
@@ -203,7 +215,24 @@ class AutoTeachRecorder:
             return
         self._pressed_keys.discard(key_name)
 
-    def _capture_click_template(self, *, session_id: str, x: int, y: int, event_id: str) -> Path | None:
+    def _capture_click_templates(self, *, session_id: str, x: int, y: int, event_id: str) -> list[dict[str, object]]:
+        templates: list[dict[str, object]] = []
+        for index, (dx, dy) in enumerate(CLICK_TEMPLATE_CANDIDATE_OFFSETS):
+            template_path = self._capture_template(
+                session_id=session_id,
+                x=x + dx,
+                y=y + dy,
+                event_id=event_id,
+                template_index=index,
+            )
+            if template_path is None:
+                continue
+            templates.append({"path": str(template_path), "dx": dx, "dy": dy})
+        return templates
+
+    def _capture_template(
+        self, *, session_id: str, x: int, y: int, event_id: str, template_index: int
+    ) -> Path | None:
         try:
             from PIL import ImageGrab  # pylint: disable=import-outside-toplevel
         except Exception:  # pragma: no cover - dependency/platform dependent
@@ -212,18 +241,17 @@ class AutoTeachRecorder:
         artifact_root = self._service.artifacts_dir() / "click_templates" / session_id
         artifact_root.mkdir(parents=True, exist_ok=True)
 
-        half_size = 24
-        left = max(0, x - half_size)
-        top = max(0, y - half_size)
-        right = max(left + 1, x + half_size)
-        bottom = max(top + 1, y + half_size)
+        left = max(0, x - CLICK_TEMPLATE_HALF_SIZE)
+        top = max(0, y - CLICK_TEMPLATE_HALF_SIZE)
+        right = max(left + 1, x + CLICK_TEMPLATE_HALF_SIZE)
+        bottom = max(top + 1, y + CLICK_TEMPLATE_HALF_SIZE)
 
         try:
             image = ImageGrab.grab(bbox=(left, top, right, bottom))
         except Exception:  # pragma: no cover - OS/screen dependent
             return None
 
-        path = artifact_root / f"{event_id}.png"
+        path = artifact_root / f"{event_id}_{template_index}.png"
         try:
             image.save(path)
         except Exception:  # pragma: no cover - filesystem dependent

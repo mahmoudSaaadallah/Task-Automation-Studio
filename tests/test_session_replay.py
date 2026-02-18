@@ -11,6 +11,7 @@ from task_automation_studio.services.session_replay import (
     _locate_template_center,
     _modifier_name_to_key,
     _normalize_speed_factor,
+    _resolve_template_click_position,
     _sleep_with_stop,
     TeachSessionReplayer,
 )
@@ -183,3 +184,23 @@ def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path)
     assert applied is True
     assert mouse_controller.position == (50, 60)
     assert mouse_controller.clicked is True
+
+
+def test_resolve_template_click_position_with_candidates() -> None:
+    payload = {
+        "template_candidates": [
+            {"path": "missing-1.png", "dx": 0, "dy": 0},
+            {"path": "found-top.png", "dx": 0, "dy": -28},
+        ]
+    }
+
+    from task_automation_studio.services import session_replay as sr
+
+    original = sr._locate_template_center
+    sr._locate_template_center = lambda path: (200, 120) if path == "found-top.png" else None  # type: ignore[assignment]
+    try:
+        resolved = _resolve_template_click_position(payload)
+    finally:
+        sr._locate_template_center = original  # type: ignore[assignment]
+
+    assert resolved == (200, 148)
