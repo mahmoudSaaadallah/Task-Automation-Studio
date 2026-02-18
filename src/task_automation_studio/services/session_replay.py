@@ -15,6 +15,7 @@ TEMPLATE_MATCH_CONFIDENCE = 0.92
 TEMPLATE_DEDUP_DISTANCE_PX = 10
 TEMPLATE_EXPECTED_MAX_DISTANCE_PX = 110
 TEMPLATE_EXPECTED_MIN_GAP_PX = 18
+CLICK_PROPOSAL_CLUSTER_TOLERANCE_PX = 14
 
 LOGGER = logging.getLogger("task_automation_studio")
 
@@ -198,6 +199,64 @@ def _pick_best_center(
     return nearest
 
 
+def _point_distance_sq(left: tuple[int, int], right: tuple[int, int]) -> int:
+    return (left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2
+
+
+def _cluster_points(
+    points: list[tuple[int, int]], *, tolerance_px: int = CLICK_PROPOSAL_CLUSTER_TOLERANCE_PX
+) -> list[list[tuple[int, int]]]:
+    if not points:
+        return []
+    clusters: list[list[tuple[int, int]]] = []
+    tolerance_sq = tolerance_px * tolerance_px
+    for point in points:
+        assigned = False
+        for cluster in clusters:
+            representative = cluster[0]
+            if _point_distance_sq(point, representative) <= tolerance_sq:
+                cluster.append(point)
+                assigned = True
+                break
+        if not assigned:
+            clusters.append([point])
+    return clusters
+
+
+def _average_point(points: list[tuple[int, int]]) -> tuple[int, int]:
+    total_x = sum(point[0] for point in points)
+    total_y = sum(point[1] for point in points)
+    return round(total_x / len(points)), round(total_y / len(points))
+
+
+def _select_click_from_proposals(
+    proposals: list[tuple[int, int]],
+    *,
+    expected_click_point: tuple[int, int] | None,
+) -> tuple[int, int] | None:
+    clusters = _cluster_points(proposals)
+    if not clusters:
+        return None
+    # Prefer the largest consensus cluster.
+    clusters.sort(key=lambda cluster: len(cluster), reverse=True)
+    top_size = len(clusters[0])
+    top_clusters = [cluster for cluster in clusters if len(cluster) == top_size]
+
+    if len(top_clusters) == 1:
+        winner = top_clusters[0]
+    elif expected_click_point is not None:
+        winner = min(
+            top_clusters,
+            key=lambda cluster: _point_distance_sq(_average_point(cluster), expected_click_point),
+        )
+    else:
+        winner = top_clusters[0]
+
+    if len(winner) < 2:
+        return None
+    return _average_point(winner)
+
+
 def _locate_template_center(
     template_path: str,
     *,
@@ -211,6 +270,15 @@ def _locate_template_center(
 def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int] | None:
     candidates = payload.get("template_candidates")
     if isinstance(candidates, list):
+        raw_x = payload.get("x")
+        raw_y = payload.get("y")
+        expected_click_point: tuple[int, int] | None = None
+        if isinstance(raw_x, int) and isinstance(raw_y, int):
+            expected_click_point = (raw_x, raw_y)
+
+        candidate_proposals: list[tuple[int, int]] = []
+        primary_anchor_proposal: tuple[int, int] | None = None
+
         for candidate in candidates:
             if not isinstance(candidate, dict):
                 continue
@@ -221,8 +289,6 @@ def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int]
                 continue
             if not isinstance(dx, int) or not isinstance(dy, int):
                 continue
-            raw_x = payload.get("x")
-            raw_y = payload.get("y")
             expected_point: tuple[int, int] | None = None
             if isinstance(raw_x, int) and isinstance(raw_y, int):
                 expected_point = (raw_x + dx, raw_y + dy)
@@ -234,7 +300,20 @@ def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int]
                 center = _locate_template_center(path, region=region, expected_point=expected_point)
                 if center is None:
                     continue
-                return center[0] - dx, center[1] - dy
+                click_point = (center[0] - dx, center[1] - dy)
+                candidate_proposals.append(click_point)
+                if dx == 0 and dy == 0 and primary_anchor_proposal is None:
+                    primary_anchor_proposal = click_point
+                break
+
+        consensus_click = _select_click_from_proposals(
+            candidate_proposals,
+            expected_click_point=expected_click_point,
+        )
+        if consensus_click is not None:
+            return consensus_click
+        if len(candidate_proposals) == 1 and primary_anchor_proposal is not None:
+            return primary_anchor_proposal
 
     template_path = payload.get("template_path")
     if isinstance(template_path, str) and template_path:

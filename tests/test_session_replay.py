@@ -6,6 +6,7 @@ from task_automation_studio.core.teach_models import TeachEventData, TeachEventT
 from task_automation_studio.services.session_replay import (
     _candidate_search_regions,
     _button_name_to_key,
+    _cluster_points,
     _dedupe_centers,
     _event_time_ms,
     _is_escape_key,
@@ -16,6 +17,7 @@ from task_automation_studio.services.session_replay import (
     _pick_best_center,
     _region_around_point,
     _resolve_template_click_position,
+    _select_click_from_proposals,
     _single_unique_center,
     _sleep_with_stop,
     _window_titles_match,
@@ -182,6 +184,19 @@ def test_pick_best_center_rejects_ambiguous() -> None:
     assert picked is None
 
 
+def test_cluster_points() -> None:
+    points = [(100, 100), (106, 104), (200, 200)]
+    clusters = _cluster_points(points, tolerance_px=14)
+    assert len(clusters) == 2
+    assert len(clusters[0]) == 2
+
+
+def test_select_click_from_proposals_requires_consensus() -> None:
+    assert _select_click_from_proposals([(100, 100)], expected_click_point=(100, 100)) is None
+    picked = _select_click_from_proposals([(100, 100), (104, 102)], expected_click_point=(100, 100))
+    assert picked == (102, 101)
+
+
 def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path) -> None:
     template = tmp_path / "click.png"
     template.write_bytes(b"dummy")
@@ -276,18 +291,26 @@ def test_apply_mouse_click_with_template_skips_if_unresolved(tmp_path: Path) -> 
 
 def test_resolve_template_click_position_with_candidates() -> None:
     payload = {
+        "x": 210,
+        "y": 140,
         "template_candidates": [
             {"path": "missing-1.png", "dx": 0, "dy": 0},
             {"path": "found-top.png", "dx": 0, "dy": -28},
+            {"path": "found-left.png", "dx": -28, "dy": 0},
         ]
     }
 
     from task_automation_studio.services import session_replay as sr
 
     original = sr._locate_template_center
-    sr._locate_template_center = (
-        lambda path, region=None, expected_point=None: (200, 120) if path == "found-top.png" else None
-    )  # type: ignore[assignment]
+    def _fake_locate(path, region=None, expected_point=None):  # type: ignore[no-untyped-def]
+        if path == "found-top.png":
+            return (200, 120)
+        if path == "found-left.png":
+            return (172, 148)
+        return None
+
+    sr._locate_template_center = _fake_locate  # type: ignore[assignment]
     try:
         resolved = _resolve_template_click_position(payload)
     finally:
