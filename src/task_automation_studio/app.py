@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
 from task_automation_studio.config.settings import Settings
+from task_automation_studio.core.teach_models import TeachEventType
 from task_automation_studio.utils.logging_config import configure_logging
 from task_automation_studio.workflows.registry import list_available_workflows, load_workflow_from_source
 
@@ -36,6 +38,31 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--email-username", default="", help="Mailbox username.")
     run_parser.add_argument("--email-password", default="", help="Mailbox password.")
     run_parser.add_argument("--email-folder", default="INBOX", help="Mailbox folder.")
+
+    teach_parser = subparsers.add_parser("teach", help="Manage teach sessions.")
+    teach_sub = teach_parser.add_subparsers(dest="teach_command", required=True)
+
+    teach_start = teach_sub.add_parser("start", help="Start a new teach session.")
+    teach_start.add_argument("--name", required=True, help="Teach session name.")
+
+    teach_event = teach_sub.add_parser("event", help="Append one event to an active teach session.")
+    teach_event.add_argument("--session-id", required=True, help="Teach session id.")
+    teach_event.add_argument("--type", required=True, choices=[item.value for item in TeachEventType], help="Event type.")
+    teach_event.add_argument("--payload", default="{}", help="Event payload as JSON object string.")
+    teach_event.add_argument("--sensitive", action="store_true", help="Mark event as sensitive.")
+
+    teach_checkpoint = teach_sub.add_parser("checkpoint", help="Add a checkpoint event.")
+    teach_checkpoint.add_argument("--session-id", required=True, help="Teach session id.")
+    teach_checkpoint.add_argument("--name", required=True, help="Checkpoint name.")
+
+    teach_finish = teach_sub.add_parser("finish", help="Finish an active teach session.")
+    teach_finish.add_argument("--session-id", required=True, help="Teach session id.")
+
+    teach_export = teach_sub.add_parser("export", help="Export teach session as JSON.")
+    teach_export.add_argument("--session-id", required=True, help="Teach session id.")
+    teach_export.add_argument("--output-file", required=True, help="Output JSON path.")
+
+    teach_sub.add_parser("list", help="List teach sessions.")
     return parser
 
 
@@ -84,9 +111,69 @@ def main() -> int:
         print(summary.to_dict())
         return 0
 
+    if args.command == "teach":
+        from task_automation_studio.services.teach_sessions import TeachSessionService
+
+        service = TeachSessionService(settings=settings)
+
+        if args.teach_command == "start":
+            session = service.start_session(name=args.name)
+            print(session.model_dump(mode="json"))
+            return 0
+
+        if args.teach_command == "event":
+            try:
+                payload = _parse_payload_json(args.payload)
+            except ValueError as exc:
+                logger.error(str(exc))
+                return 2
+            session = service.add_event(
+                session_id=args.session_id,
+                event_type=TeachEventType(args.type),
+                payload=payload,
+                sensitive=args.sensitive,
+            )
+            print(session.model_dump(mode="json"))
+            return 0
+
+        if args.teach_command == "checkpoint":
+            session = service.add_event(
+                session_id=args.session_id,
+                event_type=TeachEventType.CHECKPOINT,
+                payload={"name": args.name},
+                sensitive=False,
+            )
+            print(session.model_dump(mode="json"))
+            return 0
+
+        if args.teach_command == "finish":
+            session = service.finish_session(session_id=args.session_id)
+            print(session.model_dump(mode="json"))
+            return 0
+
+        if args.teach_command == "export":
+            output = service.export_session(session_id=args.session_id, output_file=args.output_file)
+            print({"session_id": args.session_id, "output_file": str(output)})
+            return 0
+
+        if args.teach_command == "list":
+            sessions = service.list_sessions()
+            print([session.model_dump(mode="json") for session in sessions])
+            return 0
+
     logger.info("No command provided. Use '--ui' or 'run'.")
     parser.print_help()
     return 1
+
+
+def _parse_payload_json(payload: str) -> dict[str, object]:
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid payload JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("Payload JSON must be an object.")
+    return value
 
 
 if __name__ == "__main__":

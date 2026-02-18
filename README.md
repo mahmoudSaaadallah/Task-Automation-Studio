@@ -35,6 +35,20 @@ tas run --workflow zoom_signup --input-file data/employees.xlsx --live-run \
   --email-host imap.example.com --email-username user@example.com --email-password SECRET
 ```
 
+Run from a workflow JSON file:
+```bash
+tas run --workflow-file docs/design/examples/zoom_signup.workflow.json --input-file data/employees.xlsx --dry-run
+```
+
+Teach session basics:
+```bash
+tas teach start --name "Employee Signup Session"
+tas teach event --session-id <SESSION_ID> --type open_url
+tas teach checkpoint --session-id <SESSION_ID> --name "form-submitted"
+tas teach finish --session-id <SESSION_ID>
+tas teach export --session-id <SESSION_ID> --output-file artifacts/session.json
+```
+
 Outputs:
 - Excel results file is generated under `artifacts/` (or custom `--output-file`).
 - JSON run report is generated under `artifacts/` (or custom `--report-file`).
