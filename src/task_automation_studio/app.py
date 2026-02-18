@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     teach_export.add_argument("--session-id", required=True, help="Teach session id.")
     teach_export.add_argument("--output-file", required=True, help="Output JSON path.")
 
+    teach_compile = teach_sub.add_parser("compile", help="Compile teach session into workflow JSON.")
+    teach_compile.add_argument("--session-id", required=True, help="Teach session id.")
+    teach_compile.add_argument("--workflow-id", required=True, help="Output workflow id.")
+    teach_compile.add_argument("--output-file", required=True, help="Output workflow JSON path.")
+
     teach_sub.add_parser("list", help="List teach sessions.")
     return parser
 
@@ -154,6 +159,18 @@ def main() -> int:
         if args.teach_command == "export":
             output = service.export_session(session_id=args.session_id, output_file=args.output_file)
             print({"session_id": args.session_id, "output_file": str(output)})
+            return 0
+
+        if args.teach_command == "compile":
+            from task_automation_studio.services.session_compiler import TeachSessionCompiler
+
+            compiler = TeachSessionCompiler(session_service=service)
+            output = compiler.compile_to_workflow(
+                session_id=args.session_id,
+                workflow_id=args.workflow_id,
+                output_file=args.output_file,
+            )
+            print({"session_id": args.session_id, "workflow_id": args.workflow_id, "output_file": str(output)})
             return 0
 
         if args.teach_command == "list":

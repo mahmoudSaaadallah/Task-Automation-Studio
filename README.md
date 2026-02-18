@@ -47,6 +47,7 @@ tas teach event --session-id <SESSION_ID> --type open_url
 tas teach checkpoint --session-id <SESSION_ID> --name "form-submitted"
 tas teach finish --session-id <SESSION_ID>
 tas teach export --session-id <SESSION_ID> --output-file artifacts/session.json
+tas teach compile --session-id <SESSION_ID> --workflow-id employee_signup_v1 --output-file artifacts/employee_signup_v1.workflow.json
 ```
 
 Outputs:

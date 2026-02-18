@@ -29,6 +29,11 @@ class TeachSessionService:
             sessions = repo.list_sessions()
             return [repo.to_data(item.session_id) for item in sessions]
 
+    def get_session(self, *, session_id: str) -> TeachSessionData:
+        with self._session_factory() as session:
+            repo = TeachSessionRepository(session)
+            return repo.to_data(session_id)
+
     def add_event(
         self,
         *,
