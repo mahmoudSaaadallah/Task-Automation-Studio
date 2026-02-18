@@ -59,6 +59,10 @@ tas teach compile --session-id <SESSION_ID> --workflow-id employee_signup_v1 --o
 tas teach replay --session-id <SESSION_ID> --speed-factor 1.0
 ```
 
+Shortcut note:
+- Keyboard shortcuts (for example `Ctrl+V`, `Ctrl+C`, `Alt+Tab`) are recorded and replayed as hotkeys.
+- For sessions recorded before this fix, re-recording is recommended.
+
 Outputs:
 - Excel results file is generated under `artifacts/` (or custom `--output-file`).
 - JSON run report is generated under `artifacts/` (or custom `--report-file`).
