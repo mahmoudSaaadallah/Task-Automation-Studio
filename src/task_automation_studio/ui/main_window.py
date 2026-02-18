@@ -387,6 +387,7 @@ class TeachSessionTab(QWidget):
             self.auto_status_label.setText("Status: recording (press ESC to stop)")
             self._poll_timer.start()
             self.result_output.setPlainText(json.dumps(session.model_dump(mode="json"), indent=2))
+            self._minimize_host_window()
         except Exception as exc:
             QMessageBox.critical(self, "Auto Record Failed", str(exc))
 
@@ -399,6 +400,7 @@ class TeachSessionTab(QWidget):
             self._record_status = "stopped"
             self.auto_status_label.setText("Status: stopped")
             self._poll_timer.stop()
+            self._restore_host_window()
             if self._active_record_session_id:
                 session = self._service.get_session(session_id=self._active_record_session_id)
                 self.result_output.setPlainText(json.dumps(session.model_dump(mode="json"), indent=2))
@@ -413,6 +415,7 @@ class TeachSessionTab(QWidget):
         self._record_status = "stopped"
         self.auto_status_label.setText("Status: stopped")
         self._poll_timer.stop()
+        self._restore_host_window()
         if self._active_record_session_id:
             try:
                 session = self._service.get_session(session_id=self._active_record_session_id)
@@ -545,12 +548,27 @@ class TeachSessionTab(QWidget):
         )
         if confirm != QMessageBox.StandardButton.Yes:
             return
+        self._minimize_host_window()
         try:
             summary = self._replayer.replay(session_id=session_id, speed_factor=float(self.replay_speed_input.value()))
         except Exception as exc:
+            self._restore_host_window()
             QMessageBox.critical(self, "Replay Failed", str(exc))
             return
+        self._restore_host_window()
         self.result_output.setPlainText(json.dumps(summary.to_dict(), indent=2))
+
+    def _minimize_host_window(self) -> None:
+        host = self.window()
+        if isinstance(host, QMainWindow):
+            host.showMinimized()
+
+    def _restore_host_window(self) -> None:
+        host = self.window()
+        if isinstance(host, QMainWindow):
+            host.showNormal()
+            host.raise_()
+            host.activateWindow()
 
 
 class WorkflowToolsTab(QWidget):
