@@ -9,6 +9,16 @@ cd "d:\MSaadallah\Code\Tasks Automation"
 python -m pip install -e .[dev]
 ```
 
+## تشغيل الواجهة الرسومية (UI)
+```powershell
+python -m task_automation_studio.app --ui
+```
+
+الواجهة تحتوي 3 تبويبات:
+- `Run`: تشغيل workflows على ملفات Excel.
+- `Teach`: تسجيل جلسات التعليم وإخراجها.
+- `Workflow`: التحقق من ملفات workflow قبل التشغيل.
+
 ## 2) تجهيز ملف البيانات
 أنشئ ملف Excel يحتوي الأعمدة التالية بالضبط:
 - `first_name`
@@ -18,6 +28,8 @@ python -m pip install -e .[dev]
 مثال: `data/employees.xlsx`
 
 ## 3) تسجيل جلسة تعليم (Teach Session)
+يمكن تنفيذها من تبويب `Teach` في الواجهة أو من CLI.
+
 ابدأ جلسة:
 ```powershell
 tas teach start --name "Employee Signup Session"
@@ -46,6 +58,8 @@ tas teach compile --session-id <SESSION_ID> --workflow-id employee_signup_v1 --o
 ```
 
 ## 5) تشغيل Workflow
+يمكن تشغيله من تبويب `Run` في الواجهة أو من CLI.
+
 تشغيل آمن بدون تنفيذ خارجي (`dry-run`):
 ```powershell
 tas run --workflow-file artifacts/employee_signup_v1.workflow.json --input-file data/employees.xlsx --dry-run

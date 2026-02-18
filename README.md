@@ -23,6 +23,11 @@ pip install -e .[dev]
 python -m task_automation_studio.app --ui
 ```
 
+UI tabs:
+- `Run`: execute workflows from built-in template or JSON file.
+- `Teach`: create/record session events, export, and compile workflows.
+- `Workflow`: validate workflow JSON and inspect summary.
+
 ## CLI usage
 Dry run (recommended first):
 ```bash
