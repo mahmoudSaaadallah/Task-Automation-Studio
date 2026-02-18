@@ -79,3 +79,5 @@ Runtime phase 1 is implemented:
 - Strict fail behavior for unimplemented live browser handlers.
 
 Next phase: implement real Playwright handlers for each browser action in target workflows.
+
+Arabic user guide: `docs/user-guide-ar.md`
