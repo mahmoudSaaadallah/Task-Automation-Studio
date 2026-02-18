@@ -1,12 +1,15 @@
 from datetime import datetime, timezone
+import threading
 
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
 from task_automation_studio.services.session_replay import (
     _button_name_to_key,
     _event_time_ms,
+    _is_escape_key,
     _key_name_to_key,
     _modifier_name_to_key,
     _normalize_speed_factor,
+    _sleep_with_stop,
     TeachSessionReplayer,
 )
 
@@ -106,3 +109,24 @@ def test_apply_hotkey_event() -> None:
         ("release", "v"),
         ("release", "CTRL"),
     ]
+
+
+def test_is_escape_key() -> None:
+    class _Esc:
+        def __str__(self) -> str:
+            return "Key.esc"
+
+    class _CharEsc:
+        char = "\x1b"
+
+        def __str__(self) -> str:
+            return "x"
+
+    assert _is_escape_key(_Esc()) is True
+    assert _is_escape_key(_CharEsc()) is True
+
+
+def test_sleep_with_stop() -> None:
+    stop = threading.Event()
+    stop.set()
+    assert _sleep_with_stop(0.5, stop) is False

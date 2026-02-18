@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +13,25 @@ def _normalize_speed_factor(value: float) -> float:
     if value <= 0:
         return 1.0
     return min(value, 10.0)
+
+
+def _is_escape_key(key: Any) -> bool:
+    char = getattr(key, "char", None)
+    if isinstance(char, str) and char.lower() == "\x1b":
+        return True
+    key_name = str(key).lower()
+    return key_name in {"key.esc", "esc"}
+
+
+def _sleep_with_stop(total_seconds: float, stop_event: threading.Event) -> bool:
+    remaining = max(0.0, total_seconds)
+    while remaining > 0:
+        if stop_event.is_set():
+            return False
+        chunk = min(0.05, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
+    return not stop_event.is_set()
 
 
 def _event_time_ms(event: TeachEventData) -> int:
@@ -65,6 +85,7 @@ class ReplaySummary:
     replayed_events: int
     skipped_events: int
     speed_factor: float
+    stopped_by_user: bool
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -72,6 +93,7 @@ class ReplaySummary:
             "replayed_events": self.replayed_events,
             "skipped_events": self.skipped_events,
             "speed_factor": self.speed_factor,
+            "stopped_by_user": self.stopped_by_user,
         }
 
 
@@ -90,21 +112,40 @@ class TeachSessionReplayer:
         session = self._service.get_session(session_id=session_id)
         events = sorted(session.events, key=lambda item: item.timestamp)
         if not events:
-            return ReplaySummary(session_id=session_id, replayed_events=0, skipped_events=0, speed_factor=1.0)
+            return ReplaySummary(
+                session_id=session_id,
+                replayed_events=0,
+                skipped_events=0,
+                speed_factor=1.0,
+                stopped_by_user=False,
+            )
 
         safe_speed = _normalize_speed_factor(speed_factor)
         mouse_controller = mouse.Controller()
         keyboard_controller = keyboard.Controller()
+        stop_event = threading.Event()
+
+        def _on_stop_key(key: Any) -> bool | None:
+            if _is_escape_key(key):
+                stop_event.set()
+                return False
+            return None
+
+        stop_listener = keyboard.Listener(on_press=_on_stop_key)
+        stop_listener.start()
 
         replayed_count = 0
         skipped_count = 0
         previous_time = _event_time_ms(events[0])
 
         for event in events:
+            if stop_event.is_set():
+                break
             current_time = _event_time_ms(event)
             delay_seconds = max(0, current_time - previous_time) / 1000 / safe_speed
             if delay_seconds > 0:
-                time.sleep(delay_seconds)
+                if not _sleep_with_stop(delay_seconds, stop_event):
+                    break
             previous_time = current_time
 
             applied = self._apply_event(
@@ -119,11 +160,13 @@ class TeachSessionReplayer:
             else:
                 skipped_count += 1
 
+        stop_listener.stop()
         return ReplaySummary(
             session_id=session_id,
             replayed_events=replayed_count,
             skipped_events=skipped_count,
             speed_factor=safe_speed,
+            stopped_by_user=stop_event.is_set(),
         )
 
     def _apply_event(
