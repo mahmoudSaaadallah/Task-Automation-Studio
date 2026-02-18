@@ -550,7 +550,11 @@ class TeachSessionTab(QWidget):
             return
         self._minimize_host_window()
         try:
-            summary = self._replayer.replay(session_id=session_id, speed_factor=float(self.replay_speed_input.value()))
+            summary = self._replayer.replay(
+                session_id=session_id,
+                speed_factor=float(self.replay_speed_input.value()),
+                save_diagnostics=True,
+            )
         except Exception as exc:
             self._restore_host_window()
             QMessageBox.critical(self, "Replay Failed", str(exc))
@@ -571,6 +575,7 @@ class TeachSessionTab(QWidget):
             "skipped_events": payload.get("skipped_events"),
             "speed_factor": payload.get("speed_factor"),
             "stopped_by_user": payload.get("stopped_by_user"),
+            "diagnostics_file": payload.get("diagnostics_file"),
             "failed_event_count": len(failed),
         }
 

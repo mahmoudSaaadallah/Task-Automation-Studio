@@ -82,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     teach_replay = teach_sub.add_parser("replay", help="Replay recorded global events from a teach session.")
     teach_replay.add_argument("--session-id", required=True, help="Teach session id.")
     teach_replay.add_argument("--speed-factor", type=float, default=1.0, help="Replay speed multiplier (1.0 normal).")
+    teach_replay.add_argument("--diagnostics-file", default="", help="Optional replay diagnostics JSON path.")
 
     teach_sub.add_parser("list", help="List teach sessions.")
 
@@ -224,7 +225,12 @@ def main() -> int:
             from task_automation_studio.services.session_replay import TeachSessionReplayer
 
             replayer = TeachSessionReplayer(session_service=service)
-            summary = replayer.replay(session_id=args.session_id, speed_factor=args.speed_factor)
+            summary = replayer.replay(
+                session_id=args.session_id,
+                speed_factor=args.speed_factor,
+                diagnostics_output_file=args.diagnostics_file.strip() or None,
+                save_diagnostics=True,
+            )
             print(summary.to_dict())
             return 0
 

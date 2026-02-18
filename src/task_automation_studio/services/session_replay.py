@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from task_automation_studio.core.agent_models import AgentGoal, AgentGoalType, AgentState, SkillDescriptor
@@ -106,6 +109,7 @@ class ReplaySummary:
     speed_factor: float
     stopped_by_user: bool
     diagnostics: list[dict[str, object]]
+    diagnostics_file: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -115,6 +119,7 @@ class ReplaySummary:
             "speed_factor": self.speed_factor,
             "stopped_by_user": self.stopped_by_user,
             "diagnostics": self.diagnostics,
+            "diagnostics_file": self.diagnostics_file,
         }
 
 
@@ -131,7 +136,14 @@ class TeachSessionReplayer:
     def __init__(self, session_service: TeachSessionService) -> None:
         self._service = session_service
 
-    def replay(self, *, session_id: str, speed_factor: float = 1.0) -> ReplaySummary:
+    def replay(
+        self,
+        *,
+        session_id: str,
+        speed_factor: float = 1.0,
+        diagnostics_output_file: str | Path | None = None,
+        save_diagnostics: bool = False,
+    ) -> ReplaySummary:
         try:
             from pynput import keyboard, mouse  # pylint: disable=import-outside-toplevel
         except Exception as exc:  # pragma: no cover - platform/import dependent
@@ -140,7 +152,7 @@ class TeachSessionReplayer:
         session = self._service.get_session(session_id=session_id)
         events = sorted(session.events, key=lambda item: item.timestamp)
         if not events:
-            return ReplaySummary(
+            summary = ReplaySummary(
                 session_id=session_id,
                 replayed_events=0,
                 skipped_events=0,
@@ -148,6 +160,10 @@ class TeachSessionReplayer:
                 stopped_by_user=False,
                 diagnostics=[],
             )
+            if save_diagnostics or diagnostics_output_file is not None:
+                diagnostics_path = self.save_diagnostics(summary=summary, output_file=diagnostics_output_file)
+                summary.diagnostics_file = str(diagnostics_path)
+            return summary
 
         safe_speed = _normalize_speed_factor(speed_factor)
         mouse_controller = mouse.Controller()
@@ -200,7 +216,7 @@ class TeachSessionReplayer:
                 skipped_count += 1
 
         stop_listener.stop()
-        return ReplaySummary(
+        summary = ReplaySummary(
             session_id=session_id,
             replayed_events=replayed_count,
             skipped_events=skipped_count,
@@ -208,6 +224,21 @@ class TeachSessionReplayer:
             stopped_by_user=stop_event.is_set(),
             diagnostics=diagnostics,
         )
+        if save_diagnostics or diagnostics_output_file is not None:
+            diagnostics_path = self.save_diagnostics(summary=summary, output_file=diagnostics_output_file)
+            summary.diagnostics_file = str(diagnostics_path)
+        return summary
+
+    def save_diagnostics(self, *, summary: ReplaySummary, output_file: str | Path | None = None) -> Path:
+        if output_file is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = self._service.artifacts_dir() / f"replay_diagnostics_{summary.session_id}_{timestamp}.json"
+        else:
+            output_path = Path(output_file)
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(summary.to_dict(), indent=2), encoding="utf-8")
+        return output_path
 
     def _apply_event(
         self,

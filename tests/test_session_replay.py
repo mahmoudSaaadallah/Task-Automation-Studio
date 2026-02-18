@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 import threading
 
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
@@ -289,3 +290,24 @@ def test_replay_summary_to_dict_includes_diagnostics() -> None:
     assert payload["session_id"] == "s1"
     assert isinstance(payload["diagnostics"], list)
     assert payload["diagnostics"][0]["reason"] == "agent_failed"
+    assert payload["diagnostics_file"] is None
+
+
+def test_save_diagnostics_writes_json(tmp_path: Path) -> None:
+    class _Service:
+        def artifacts_dir(self) -> Path:
+            return tmp_path
+
+    replayer = TeachSessionReplayer(session_service=_Service())  # type: ignore[arg-type]
+    summary = ReplaySummary(
+        session_id="s2",
+        replayed_events=1,
+        skipped_events=0,
+        speed_factor=1.0,
+        stopped_by_user=False,
+        diagnostics=[{"event_id": "e2", "applied": True, "reason": "ok", "details": {}}],
+    )
+    output = replayer.save_diagnostics(summary=summary)
+    assert output.exists()
+    content = output.read_text(encoding="utf-8")
+    assert '"session_id": "s2"' in content
