@@ -5,7 +5,11 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from task_automation_studio.core.agent_models import AgentGoal, AgentGoalType, AgentState, SkillDescriptor
 from task_automation_studio.core.teach_models import TeachEventData, TeachEventType
+from task_automation_studio.services.agent_planner import GoalPlanner
+from task_automation_studio.services.agent_runtime import AgentRuntime
+from task_automation_studio.services.agent_skills import AgentSkillRegistry
 from task_automation_studio.services.smart_locator import resolve_smart_click_position
 from task_automation_studio.services.teach_sessions import TeachSessionService
 
@@ -77,6 +81,17 @@ def _modifier_name_to_key(name: str, keyboard_module: Any) -> Any:
         if key is None:
             key = getattr(keyboard_module.Key, "cmd_l", None)
         return key
+    return None
+
+
+def _resolve_click_target(payload: dict[str, Any]) -> tuple[int, int] | None:
+    smart_click = resolve_smart_click_position(payload)
+    if smart_click is not None:
+        return smart_click
+    x = payload.get("x")
+    y = payload.get("y")
+    if isinstance(x, int) and isinstance(y, int):
+        return x, y
     return None
 
 
@@ -180,16 +195,11 @@ class TeachSessionReplayer:
         keyboard_controller: Any,
     ) -> bool:
         if event.event_type == TeachEventType.MOUSE_CLICK:
-            x = event.payload.get("x")
-            y = event.payload.get("y")
-            button_name = str(event.payload.get("button", "left"))
-            smart_click = resolve_smart_click_position(event.payload)
-            if smart_click is not None:
-                x, y = smart_click
-            if isinstance(x, int) and isinstance(y, int):
-                mouse_controller.position = (x, y)
-            mouse_controller.click(_button_name_to_key(button_name, mouse_module), 1)
-            return True
+            return self._run_mouse_click_agent(
+                event=event,
+                mouse_module=mouse_module,
+                mouse_controller=mouse_controller,
+            )
 
         if event.event_type == TeachEventType.MOUSE_SCROLL:
             x = event.payload.get("x")
@@ -233,3 +243,110 @@ class TeachSessionReplayer:
             return True
 
         return False
+
+    def _run_mouse_click_agent(self, *, event: TeachEventData, mouse_module: Any, mouse_controller: Any) -> bool:
+        button_name = str(event.payload.get("button", "left")).lower()
+        registry = AgentSkillRegistry()
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_locate_click",
+                name="Locate click target",
+                supported_intents=["locate_target"],
+                required_inputs=["event_payload"],
+                default_success_signals=["target_located"],
+                reliability_score=0.9,
+            )
+        )
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_apply_click",
+                name="Apply mouse click",
+                supported_intents=["apply_action"],
+                required_inputs=["button_name"],
+                default_success_signals=["click_applied"],
+                reliability_score=0.92,
+            )
+        )
+        registry.register(
+            SkillDescriptor(
+                skill_id="ui_verify_click",
+                name="Verify mouse click",
+                supported_intents=["verify_outcome"],
+                required_inputs=[],
+                default_success_signals=["click_verified"],
+                reliability_score=0.88,
+            )
+        )
+
+        def _locate_handler(**kwargs):  # type: ignore[no-untyped-def]
+            step = kwargs["step"]
+            state = kwargs["state"]
+            payload = step.input_bindings.get("event_payload")
+            if not isinstance(payload, dict):
+                return {"success": False, "verified": False, "message": "Missing event payload.", "signals": []}
+            target = _resolve_click_target(payload)
+            if target is None:
+                return {"success": False, "verified": False, "message": "No click target resolved.", "signals": []}
+            state.variables["target_x"] = target[0]
+            state.variables["target_y"] = target[1]
+            state.variables["button_name"] = str(step.input_bindings.get("button_name", "left")).lower()
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Target located.",
+                "signals": ["target_located"],
+                "state_updates": {"target_x": target[0], "target_y": target[1]},
+                "evidence": {"target": target},
+            }
+
+        def _apply_handler(**kwargs):  # type: ignore[no-untyped-def]
+            state = kwargs["state"]
+            target_x = state.variables.get("target_x")
+            target_y = state.variables.get("target_y")
+            if not isinstance(target_x, int) or not isinstance(target_y, int):
+                return {"success": False, "verified": False, "message": "Target coordinates are missing.", "signals": []}
+            click_button_name = str(state.variables.get("button_name", button_name))
+            mouse_controller.position = (target_x, target_y)
+            mouse_controller.click(_button_name_to_key(click_button_name, mouse_module), 1)
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Click applied.",
+                "signals": ["click_applied"],
+                "state_updates": {"click_applied": True},
+                "evidence": {"clicked_point": [target_x, target_y], "button": click_button_name},
+            }
+
+        def _verify_handler(**kwargs):  # type: ignore[no-untyped-def]
+            state = kwargs["state"]
+            clicked = bool(state.variables.get("click_applied", False))
+            target_x = state.variables.get("target_x")
+            target_y = state.variables.get("target_y")
+            if not clicked or not isinstance(target_x, int) or not isinstance(target_y, int):
+                return {"success": False, "verified": False, "message": "Click not applied.", "signals": []}
+            return {
+                "success": True,
+                "verified": True,
+                "message": "Click verified.",
+                "signals": ["click_verified"],
+                "evidence": {"target": [target_x, target_y]},
+            }
+
+        registry.register_handler(skill_id="ui_locate_click", handler=_locate_handler)
+        registry.register_handler(skill_id="ui_apply_click", handler=_apply_handler)
+        registry.register_handler(skill_id="ui_verify_click", handler=_verify_handler)
+
+        goal = AgentGoal(
+            goal_id=event.event_id,
+            name="Replay mouse click",
+            goal_type=AgentGoalType.REPETITIVE_TASK,
+            requested_intents=["locate_target", "apply_action", "verify_outcome"],
+            inputs={"event_payload": event.payload, "button_name": button_name},
+            success_criteria=["click_verified"],
+        )
+
+        planner = GoalPlanner(skill_registry=registry)
+        plan = planner.build_plan(goal=goal, state=AgentState())
+        runtime = AgentRuntime(skills=registry)
+        summary = runtime.run(goal=goal, plan=plan, state=AgentState())
+        return summary.completed

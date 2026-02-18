@@ -9,6 +9,7 @@ from task_automation_studio.services.session_replay import (
     _key_name_to_key,
     _modifier_name_to_key,
     _normalize_speed_factor,
+    _resolve_click_target,
     _sleep_with_stop,
     TeachSessionReplayer,
 )
@@ -149,6 +150,42 @@ def test_apply_mouse_click_prefers_smart_locator() -> None:
     assert applied is True
     assert mouse_controller.position == (44, 66)
     assert mouse_controller.clicked is True
+
+
+def test_apply_mouse_click_fails_without_target() -> None:
+    event = TeachEventData(
+        event_id="e_click_missing",
+        event_type=TeachEventType.MOUSE_CLICK,
+        payload={"button": "left"},
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    class _MouseControllerCapture(_MouseControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.clicked = False
+
+        def click(self, *_args):  # type: ignore[no-untyped-def]
+            self.clicked = True
+            return None
+
+    keyboard_controller = _KeyboardControllerStub()
+    mouse_controller = _MouseControllerCapture()
+    replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
+    applied = replayer._apply_event(  # type: ignore[attr-defined]
+        event=event,
+        mouse_module=_MouseStub,
+        keyboard_module=_KeyStub,
+        mouse_controller=mouse_controller,
+        keyboard_controller=keyboard_controller,
+    )
+
+    assert applied is False
+    assert mouse_controller.clicked is False
+
+
+def test_resolve_click_target_fallback_to_coordinates() -> None:
+    assert _resolve_click_target({"x": 12, "y": 99}) == (12, 99)
 
 
 def test_is_escape_key() -> None:
