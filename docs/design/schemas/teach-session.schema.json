@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://task-automation-studio/schemas/teach-session.schema.json",
+  "title": "Teach Session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "name", "started_at", "events"],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "timestamp", "type", "payload"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "type": {
+            "type": "string",
+            "enum": [
+              "open_url",
+              "click",
+              "fill",
+              "wait_for",
+              "clipboard_copy",
+              "clipboard_paste",
+              "window_switch",
+              "checkpoint"
+            ]
+          },
+          "payload": { "type": "object" },
+          "sensitive": { "type": "boolean", "default": false }
+        }
+      }
+    }
+  }
+}
