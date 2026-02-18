@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 
 from task_automation_studio.core.enums import ExecutionStatus, RecordStatus
 from task_automation_studio.core.interfaces import StepExecutor
@@ -18,9 +19,15 @@ from task_automation_studio.core.models import (
 class WorkflowEngine:
     """Deterministic workflow executor with safe-stop behavior."""
 
-    def __init__(self, executors: dict[str, StepExecutor], logger: logging.Logger | None = None) -> None:
+    def __init__(
+        self,
+        executors: dict[str, StepExecutor],
+        logger: logging.Logger | None = None,
+        sleep_fn: Callable[[float], None] | None = None,
+    ) -> None:
         self._executors = executors
         self._logger = logger or logging.getLogger(__name__)
+        self._sleep = sleep_fn or time.sleep
 
     def run_record(
         self,
@@ -62,7 +69,7 @@ class WorkflowEngine:
                     error_message=message,
                 )
 
-            result = executor.execute(step=step, context=context, dry_run=dry_run)
+            result = self._execute_with_retry(executor=executor, step=step, context=context, dry_run=dry_run)
             step_results.append(result)
 
             post_check = self._post_check(step=step, result=result)
@@ -86,6 +93,44 @@ class WorkflowEngine:
                 )
 
         return RecordResult(record=record, status=RecordStatus.SUCCESS, step_results=step_results)
+
+    def _execute_with_retry(
+        self,
+        *,
+        executor: StepExecutor,
+        step: StepDefinition,
+        context: RecordContext,
+        dry_run: bool,
+    ) -> StepExecutionResult:
+        attempts = step.policy.retry_count + 1
+        last_result: StepExecutionResult | None = None
+
+        for attempt in range(1, attempts + 1):
+            result = executor.execute(step=step, context=context, dry_run=dry_run)
+            result.attempt = attempt
+            last_result = result
+            if result.status == ExecutionStatus.SUCCESS:
+                return result
+
+            if attempt < attempts and not dry_run:
+                wait_seconds = step.policy.retry_backoff_seconds * (2 ** (attempt - 1))
+                self._logger.warning(
+                    "Step '%s' failed (attempt %s/%s). Retrying in %ss.",
+                    step.step_id,
+                    attempt,
+                    attempts,
+                    wait_seconds,
+                )
+                self._sleep(wait_seconds)
+
+        if last_result is None:
+            return StepExecutionResult(
+                step_id=step.step_id,
+                status=ExecutionStatus.FAILED,
+                message="Step execution returned no result.",
+                attempt=attempts,
+            )
+        return last_result
 
     def run_batch(
         self,

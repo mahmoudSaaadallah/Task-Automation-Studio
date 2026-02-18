@@ -23,6 +23,23 @@ pip install -e .[dev]
 python -m task_automation_studio.app --ui
 ```
 
+## CLI usage
+Dry run (recommended first):
+```bash
+tas run --workflow zoom_signup --input-file data/employees.xlsx --dry-run
+```
+
+Live run (connectors must be configured):
+```bash
+tas run --workflow zoom_signup --input-file data/employees.xlsx --live-run \
+  --email-host imap.example.com --email-username user@example.com --email-password SECRET
+```
+
+Outputs:
+- Excel results file is generated under `artifacts/` (or custom `--output-file`).
+- JSON run report is generated under `artifacts/` (or custom `--report-file`).
+- SQLite state is stored at `data/app.db` by default.
+
 ## Project layout
 ```text
 src/task_automation_studio/
@@ -40,4 +57,9 @@ docs/
 ```
 
 ## Current status
-This is a production-oriented scaffold (phase 1). Business-specific steps and integrations will be implemented incrementally.
+Runtime phase 1 is implemented:
+- End-to-end run pipeline (Excel -> workflow engine -> SQLite -> report).
+- Retry + safe-stop + duplicate-email protection per run.
+- Strict fail behavior for unimplemented live browser handlers.
+
+Next phase: implement real Playwright handlers for each browser action in target workflows.

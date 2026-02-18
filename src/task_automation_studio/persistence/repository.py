@@ -22,6 +22,8 @@ class JobRepository:
     def add_record_result(self, job_run_id: int, result: RecordResult) -> RecordRun:
         record = RecordRun(
             job_run_id=job_run_id,
+            first_name=result.record.first_name,
+            last_name=result.record.last_name,
             email=result.record.email,
             status=result.status.value,
             error_code=result.error_code,
@@ -37,5 +39,5 @@ class JobRepository:
         if job is None:
             return
         job.status = status
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now()
         self._session.commit()

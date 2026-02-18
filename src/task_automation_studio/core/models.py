@@ -21,6 +21,7 @@ class StepDefinition(BaseModel):
     step_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     action: str = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
     required_inputs: list[str] = Field(default_factory=list)
     success_signals: list[str] = Field(default_factory=list)
     policy: StepPolicy = Field(default_factory=StepPolicy)
@@ -55,6 +56,7 @@ class StepExecutionResult(BaseModel):
     status: ExecutionStatus
     message: str = ""
     evidence: dict[str, Any] = Field(default_factory=dict)
+    attempt: int = 1
 
 
 class RecordResult(BaseModel):
