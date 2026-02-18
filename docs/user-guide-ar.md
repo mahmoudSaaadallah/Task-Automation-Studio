@@ -9,6 +9,14 @@ cd "d:\MSaadallah\Code\Tasks Automation"
 python -m pip install -e .[dev]
 ```
 
+## 1.1) تحويله لتطبيق Windows (.exe)
+```powershell
+.\scripts\build_windows.ps1
+```
+
+مكان الملف الناتج:
+- `dist\Task-Automation-Studio 1.0.0\Task-Automation-Studio 1.0.0.exe`
+
 ## تشغيل الواجهة الرسومية (UI)
 ```powershell
 python -m task_automation_studio.app --ui

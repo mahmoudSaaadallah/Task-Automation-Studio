@@ -1,4 +1,4 @@
-# Task Automation Studio
+# Task-Automation-Studio 1.0.0
 
 Desktop-first Python platform for high-accuracy repetitive task automation.
 
@@ -22,6 +22,14 @@ python -m venv .venv
 pip install -e .[dev]
 python -m task_automation_studio.app --ui
 ```
+
+## Build Windows App (EXE)
+```powershell
+.\scripts\build_windows.ps1
+```
+
+Expected output:
+- `dist\Task-Automation-Studio 1.0.0\Task-Automation-Studio 1.0.0.exe`
 
 UI tabs:
 - `Run`: execute workflows from built-in template or JSON file.
