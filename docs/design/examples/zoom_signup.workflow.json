@@ -1,0 +1,65 @@
+{
+  "workflow_id": "zoom_signup_v2",
+  "name": "Zoom Signup (Teach-Derived)",
+  "version": "1.0.0",
+  "mode": "browser_first",
+  "bindings": {
+    "employee_email": "{{record.email}}",
+    "employee_first_name": "{{record.first_name}}",
+    "employee_last_name": "{{record.last_name}}"
+  },
+  "steps": [
+    {
+      "id": "open_zoom_signup",
+      "type": "open_url",
+      "params": {
+        "url": "https://zoom.us/signup"
+      },
+      "required_inputs": [],
+      "pre_check": {},
+      "post_check": {
+        "url_contains": "zoom.us/signup"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff_seconds": 2
+      },
+      "on_failure": "fail_record"
+    },
+    {
+      "id": "fill_email",
+      "type": "fill_field",
+      "params": {
+        "selector": "input[name='email']",
+        "value": "{{record.email}}"
+      },
+      "required_inputs": ["email"],
+      "pre_check": {},
+      "post_check": {
+        "field_not_empty": true
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff_seconds": 2
+      },
+      "on_failure": "needs_review"
+    },
+    {
+      "id": "submit_signup",
+      "type": "click",
+      "params": {
+        "selector": "button[type='submit']"
+      },
+      "required_inputs": [],
+      "pre_check": {},
+      "post_check": {
+        "text_contains": "verification"
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff_seconds": 2
+      },
+      "on_failure": "needs_review"
+    }
+  ]
+}

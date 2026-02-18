@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://task-automation-studio/schemas/workflow.schema.json",
+  "title": "Task Automation Workflow",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workflow_id", "name", "version", "mode", "steps", "bindings"],
+  "properties": {
+    "workflow_id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "enum": ["browser_first"] },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "params", "required_inputs", "retry", "on_failure"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "open_url",
+              "fill_field",
+              "click",
+              "wait_for",
+              "fetch_otp",
+              "write_cell",
+              "mark_record_done"
+            ]
+          },
+          "params": { "type": "object" },
+          "required_inputs": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "pre_check": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "boolean"] }
+          },
+          "post_check": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "boolean"] }
+          },
+          "retry": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["max_attempts", "backoff_seconds"],
+            "properties": {
+              "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+              "backoff_seconds": { "type": "integer", "minimum": 1, "maximum": 120 }
+            }
+          },
+          "on_failure": {
+            "type": "string",
+            "enum": ["fail_record", "needs_review"]
+          }
+        }
+      }
+    }
+  }
+}
