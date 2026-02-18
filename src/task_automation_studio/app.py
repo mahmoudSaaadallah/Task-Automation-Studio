@@ -5,7 +5,7 @@ import logging
 
 from task_automation_studio.config.settings import Settings
 from task_automation_studio.utils.logging_config import configure_logging
-from task_automation_studio.workflows.registry import list_available_workflows, load_workflow
+from task_automation_studio.workflows.registry import list_available_workflows, load_workflow_from_source
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,7 +15,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", help="Run a workflow against an Excel file.")
-    run_parser.add_argument("--workflow", required=True, choices=list_available_workflows(), help="Workflow name.")
+    workflow_group = run_parser.add_mutually_exclusive_group(required=True)
+    workflow_group.add_argument("--workflow", choices=list_available_workflows(), help="Built-in workflow name.")
+    workflow_group.add_argument("--workflow-file", help="Path to workflow JSON file.")
     run_parser.add_argument("--input-file", required=True, help="Input Excel file path.")
     run_parser.add_argument("--output-file", help="Output Excel file path for run results.")
     run_parser.add_argument("--report-file", help="JSON report output path.")
@@ -54,7 +56,7 @@ def main() -> int:
         from task_automation_studio.services.executors import EmailRuntimeConfig
         from task_automation_studio.services.runner import AutomationRunner
 
-        workflow = load_workflow(args.workflow)
+        workflow = load_workflow_from_source(workflow_name=args.workflow, workflow_file=args.workflow_file)
         email_config = EmailRuntimeConfig(
             enabled=bool(args.email_host and args.email_username and args.email_password),
             host=args.email_host,
