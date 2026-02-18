@@ -1,6 +1,7 @@
 param(
     [string]$PythonExe = ".\env\Scripts\python.exe",
-    [string]$AppName = "Task-Automation-Studio 1.0.0"
+    [string]$AppName = "Task-Automation-Studio 1.0.0",
+    [string]$SpecFile = ".\Task-Automation-Studio 1.0.0.spec"
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,13 +12,13 @@ if (-not (Test-Path $PythonExe)) {
 
 & $PythonExe -m pip install -e .[dev]
 
+if (-not (Test-Path $SpecFile)) {
+    throw "Spec file not found: $SpecFile"
+}
+
 & $PythonExe -m PyInstaller `
     --noconfirm `
     --clean `
-    --windowed `
-    --name "$AppName" `
-    --collect-all PySide6 `
-    --collect-all shiboken6 `
-    src/task_automation_studio/desktop_entry.py
+    "$SpecFile"
 
 Write-Host "Build completed. EXE path: dist\$AppName\$AppName.exe"
