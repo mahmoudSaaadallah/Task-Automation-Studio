@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -30,6 +29,7 @@ from task_automation_studio.services.executors import EmailRuntimeConfig
 from task_automation_studio.services.runner import AutomationRunner
 from task_automation_studio.services.session_compiler import TeachSessionCompiler
 from task_automation_studio.services.teach_sessions import TeachSessionService
+from task_automation_studio.workflows.loader import summarize_workflow
 from task_automation_studio.workflows.registry import list_available_workflows, load_workflow_from_source
 
 
@@ -443,6 +443,64 @@ class TeachSessionTab(QWidget):
         self.result_output.setPlainText(json.dumps(payload, indent=2))
 
 
+class WorkflowToolsTab(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        validate_group = QGroupBox("Validate Workflow File")
+        validate_form = QFormLayout(validate_group)
+
+        self.workflow_file_input = QLineEdit()
+        self.workflow_file_button = QPushButton("Browse...")
+        self.workflow_file_button.clicked.connect(self._browse_workflow_file)
+        workflow_row = QWidget()
+        workflow_layout = QHBoxLayout(workflow_row)
+        workflow_layout.setContentsMargins(0, 0, 0, 0)
+        workflow_layout.addWidget(self.workflow_file_input)
+        workflow_layout.addWidget(self.workflow_file_button)
+        validate_form.addRow("Workflow JSON", workflow_row)
+
+        self.validate_button = QPushButton("Validate")
+        self.validate_button.clicked.connect(self._validate_workflow)
+        validate_form.addRow("", self.validate_button)
+        layout.addWidget(validate_group)
+
+        info_group = QGroupBox("Built-in Workflows")
+        info_layout = QVBoxLayout(info_group)
+        self.builtin_output = QTextEdit()
+        self.builtin_output.setReadOnly(True)
+        self.builtin_output.setPlainText(json.dumps({"available_workflows": list_available_workflows()}, indent=2))
+        info_layout.addWidget(self.builtin_output)
+        layout.addWidget(info_group)
+
+        self.result_output = QTextEdit()
+        self.result_output.setReadOnly(True)
+        self.result_output.setPlaceholderText("Workflow validation summary will appear here.")
+        layout.addWidget(self.result_output)
+
+    def _browse_workflow_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select workflow JSON", "", "JSON Files (*.json);;All Files (*)")
+        if path:
+            self.workflow_file_input.setText(path)
+
+    def _validate_workflow(self) -> None:
+        workflow_file = self.workflow_file_input.text().strip()
+        if not workflow_file:
+            QMessageBox.warning(self, "Missing File", "Please select workflow JSON file.")
+            return
+        try:
+            summary = summarize_workflow(workflow_file)
+        except Exception as exc:
+            QMessageBox.critical(self, "Validation Failed", str(exc))
+            return
+        self.result_output.setPlainText(json.dumps(summary, indent=2))
+        QMessageBox.information(self, "Validation Completed", "Workflow file is valid.")
+
+
 class MainWindow(QMainWindow):
     def __init__(self, settings: Settings) -> None:
         super().__init__()
@@ -452,17 +510,8 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(RunWorkflowTab(settings=settings), "Run")
         tabs.addTab(TeachSessionTab(settings=settings), "Teach")
-        tabs.addTab(self._build_placeholder_tab("Workflow tools are available in CLI and will be added here next."), "Workflow")
+        tabs.addTab(WorkflowToolsTab(), "Workflow")
         self.setCentralWidget(tabs)
-
-    def _build_placeholder_tab(self, text: str) -> QWidget:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        label = QLabel(text)
-        label.setWordWrap(True)
-        layout.addWidget(label)
-        layout.addStretch()
-        return tab
 
 
 def launch_ui(settings: Settings | None = None) -> int:
