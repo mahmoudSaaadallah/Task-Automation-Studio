@@ -6,6 +6,7 @@ This folder defines the target design for evolving Task Automation Studio from w
 - `01-architecture-overview.md`: system architecture, runtime layers, and execution contracts.
 - `02-workflow-dsl.md`: no-code workflow runtime format and validation contract.
 - `03-teach-session-and-replay.md`: teach lifecycle, replay gates, and failure model.
+- `04-implementation-workflow.md`: delivery phases, quality gates, and release checkpoints.
 - `schemas/workflow.schema.json`: JSON schema for workflow files.
 - `schemas/teach-session.schema.json`: JSON schema for recorder output.
 - `examples/zoom_signup.workflow.json`: reference workflow example.
