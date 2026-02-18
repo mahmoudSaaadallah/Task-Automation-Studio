@@ -10,6 +10,8 @@ from task_automation_studio.core.teach_models import TeachEventData, TeachEventT
 from task_automation_studio.services.teach_sessions import TeachSessionService
 
 SEARCH_RADIUS_PX = 140
+TEMPLATE_MATCH_CONFIDENCE = 0.92
+TEMPLATE_DEDUP_DISTANCE_PX = 10
 
 
 def _normalize_speed_factor(value: float) -> float:
@@ -117,27 +119,55 @@ def _candidate_search_regions(payload: dict[str, Any], *, dx: int, dy: int) -> l
     return unique_regions
 
 
-def _locate_template_center(template_path: str, *, region: tuple[int, int, int, int] | None = None) -> tuple[int, int] | None:
+def _dedupe_centers(centers: list[tuple[int, int]], *, min_distance_px: int) -> list[tuple[int, int]]:
+    unique: list[tuple[int, int]] = []
+    for center in centers:
+        if any(abs(center[0] - item[0]) <= min_distance_px and abs(center[1] - item[1]) <= min_distance_px for item in unique):
+            continue
+        unique.append(center)
+    return unique
+
+
+def _locate_template_centers(
+    template_path: str, *, region: tuple[int, int, int, int] | None = None, confidence: float = TEMPLATE_MATCH_CONFIDENCE
+) -> list[tuple[int, int]]:
     path = Path(template_path)
     if not path.exists():
-        return None
+        return []
     try:
         import pyautogui  # pylint: disable=import-outside-toplevel
     except Exception:  # pragma: no cover - dependency/platform dependent
-        return None
+        return []
 
     try:
-        if region is None:
-            box = pyautogui.locateOnScreen(str(path), grayscale=True)
-        else:
-            box = pyautogui.locateOnScreen(str(path), grayscale=True, region=region)
-    except Exception:  # pragma: no cover - screen/env dependent
-        return None
-    if box is None:
-        return None
+        kwargs: dict[str, Any] = {"grayscale": True}
+        if region is not None:
+            kwargs["region"] = region
 
-    center = pyautogui.center(box)
-    return int(center.x), int(center.y)
+        try:
+            boxes = list(pyautogui.locateAllOnScreen(str(path), confidence=confidence, **kwargs))
+        except TypeError:
+            # confidence requires OpenCV; fall back to backend default when unavailable.
+            boxes = list(pyautogui.locateAllOnScreen(str(path), **kwargs))
+    except Exception:  # pragma: no cover - screen/env dependent
+        return []
+
+    centers: list[tuple[int, int]] = []
+    for box in boxes:
+        center = pyautogui.center(box)
+        centers.append((int(center.x), int(center.y)))
+    return _dedupe_centers(centers, min_distance_px=TEMPLATE_DEDUP_DISTANCE_PX)
+
+
+def _single_unique_center(centers: list[tuple[int, int]]) -> tuple[int, int] | None:
+    if len(centers) != 1:
+        return None
+    return centers[0]
+
+
+def _locate_template_center(template_path: str, *, region: tuple[int, int, int, int] | None = None) -> tuple[int, int] | None:
+    centers = _locate_template_centers(template_path, region=region, confidence=TEMPLATE_MATCH_CONFIDENCE)
+    return _single_unique_center(centers)
 
 
 def _resolve_template_click_position(payload: dict[str, Any]) -> tuple[int, int] | None:
@@ -328,6 +358,9 @@ class TeachSessionReplayer:
             resolved_position = _resolve_template_click_position(event.payload)
             if resolved_position is not None:
                 x, y = resolved_position
+            elif "template_candidates" in event.payload or "template_path" in event.payload:
+                # Template-based events should never fall back to blind absolute coordinates.
+                return False
 
             if isinstance(x, int) and isinstance(y, int):
                 mouse_controller.position = (x, y)

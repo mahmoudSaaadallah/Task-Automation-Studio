@@ -6,6 +6,7 @@ from task_automation_studio.core.teach_models import TeachEventData, TeachEventT
 from task_automation_studio.services.session_replay import (
     _candidate_search_regions,
     _button_name_to_key,
+    _dedupe_centers,
     _event_time_ms,
     _is_escape_key,
     _key_name_to_key,
@@ -14,6 +15,7 @@ from task_automation_studio.services.session_replay import (
     _normalize_speed_factor,
     _region_around_point,
     _resolve_template_click_position,
+    _single_unique_center,
     _sleep_with_stop,
     _window_titles_match,
     TeachSessionReplayer,
@@ -157,6 +159,16 @@ def test_candidate_search_regions_include_nearby() -> None:
     assert regions[0] == (160, 260, 280, 280)
 
 
+def test_dedupe_centers() -> None:
+    centers = [(100, 100), (104, 102), (130, 130)]
+    assert _dedupe_centers(centers, min_distance_px=10) == [(100, 100), (130, 130)]
+
+
+def test_single_unique_center() -> None:
+    assert _single_unique_center([(12, 20)]) == (12, 20)
+    assert _single_unique_center([(12, 20), (13, 20)]) is None
+
+
 def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path) -> None:
     template = tmp_path / "click.png"
     template.write_bytes(b"dummy")
@@ -202,6 +214,51 @@ def test_apply_mouse_click_with_template_prefers_template_center(tmp_path: Path)
     assert applied is True
     assert mouse_controller.position == (50, 60)
     assert mouse_controller.clicked is True
+
+
+def test_apply_mouse_click_with_template_skips_if_unresolved(tmp_path: Path) -> None:
+    template = tmp_path / "click.png"
+    template.write_bytes(b"dummy")
+    event = TeachEventData(
+        event_id="e_click_skip",
+        event_type=TeachEventType.MOUSE_CLICK,
+        payload={"x": 111, "y": 222, "button": "left", "template_path": str(template)},
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    class _MouseControllerCapture(_MouseControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.clicked = False
+
+        def click(self, *_args):  # type: ignore[no-untyped-def]
+            self.clicked = True
+            return None
+
+    class _DummyService:
+        pass
+
+    keyboard_controller = _KeyboardControllerStub()
+    mouse_controller = _MouseControllerCapture()
+    replayer = TeachSessionReplayer(session_service=_DummyService())  # type: ignore[arg-type]
+
+    from task_automation_studio.services import session_replay as sr
+
+    original = sr._locate_template_center
+    sr._locate_template_center = lambda _path, region=None: None  # type: ignore[assignment]
+    try:
+        applied = replayer._apply_event(  # type: ignore[attr-defined]
+            event=event,
+            mouse_module=_MouseStub,
+            keyboard_module=_KeyStub,
+            mouse_controller=mouse_controller,
+            keyboard_controller=keyboard_controller,
+        )
+    finally:
+        sr._locate_template_center = original  # type: ignore[assignment]
+
+    assert applied is False
+    assert mouse_controller.clicked is False
 
 
 def test_resolve_template_click_position_with_candidates() -> None:
