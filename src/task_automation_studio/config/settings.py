@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass(slots=True)
 class Settings:
-    app_name: str = "Task Automation Studio"
+    app_name: str = "Task-Automation-Studio 1.0.0"
     database_url: str = "sqlite:///data/app.db"
     log_dir: Path = Path("logs")
     artifacts_dir: Path = Path("artifacts")
