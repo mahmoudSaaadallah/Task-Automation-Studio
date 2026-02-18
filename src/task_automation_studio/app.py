@@ -46,6 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     teach_start = teach_sub.add_parser("start", help="Start a new teach session.")
     teach_start.add_argument("--name", required=True, help="Teach session name.")
 
+    teach_record = teach_sub.add_parser("record", help="Auto-record global events until ESC is pressed.")
+    teach_record.add_argument("--name", required=True, help="Teach session name.")
+    teach_record.add_argument("--max-seconds", type=float, default=0.0, help="Optional timeout. 0 means wait until ESC.")
+
     teach_event = teach_sub.add_parser("event", help="Append one event to an active teach session.")
     teach_event.add_argument("--session-id", required=True, help="Teach session id.")
     teach_event.add_argument("--type", required=True, choices=[item.value for item in TeachEventType], help="Event type.")
@@ -137,6 +141,31 @@ def main() -> int:
         if args.teach_command == "start":
             session = service.start_session(name=args.name)
             print(session.model_dump(mode="json"))
+            return 0
+
+        if args.teach_command == "record":
+            from task_automation_studio.services.auto_recorder import AutoTeachRecorder
+
+            session = service.start_session(name=args.name)
+            recorder = AutoTeachRecorder(session_service=service)
+            recorder.start(session_id=session.session_id)
+            print(
+                {
+                    "session_id": session.session_id,
+                    "status": "recording",
+                    "message": "Recording started. Press ESC to stop.",
+                }
+            )
+            try:
+                timeout = args.max_seconds if args.max_seconds > 0 else None
+                recorder.wait_until_stopped(timeout=timeout)
+                if recorder.is_recording:
+                    recorder.stop(finish_session=True)
+            except KeyboardInterrupt:
+                if recorder.is_recording:
+                    recorder.stop(finish_session=True)
+            final_session = service.get_session(session_id=session.session_id)
+            print(final_session.model_dump(mode="json"))
             return 0
 
         if args.teach_command == "event":

@@ -34,3 +34,10 @@ def test_parser_supports_workflow_validate() -> None:
     args = parser.parse_args(["workflow", "validate", "--workflow-file", "x.json"])
     assert args.command == "workflow"
     assert args.workflow_command == "validate"
+
+
+def test_parser_supports_teach_record() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["teach", "record", "--name", "auto capture"])
+    assert args.command == "teach"
+    assert args.teach_command == "record"
