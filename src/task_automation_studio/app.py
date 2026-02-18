@@ -95,7 +95,7 @@ def main() -> int:
     if args.ui or args.command == "ui":
         from task_automation_studio.ui.main_window import launch_ui
 
-        return launch_ui()
+        return launch_ui(settings=settings)
 
     if args.command == "run":
         from task_automation_studio.services.executors import EmailRuntimeConfig
