@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -25,9 +27,11 @@ from PySide6.QtWidgets import (
 
 from task_automation_studio.config.settings import Settings
 from task_automation_studio.core.teach_models import TeachEventType
+from task_automation_studio.services.auto_recorder import AutoTeachRecorder
 from task_automation_studio.services.executors import EmailRuntimeConfig
 from task_automation_studio.services.runner import AutomationRunner
 from task_automation_studio.services.session_compiler import TeachSessionCompiler
+from task_automation_studio.services.session_replay import TeachSessionReplayer
 from task_automation_studio.services.teach_sessions import TeachSessionService
 from task_automation_studio.workflows.loader import summarize_workflow
 from task_automation_studio.workflows.registry import list_available_workflows, load_workflow_from_source
@@ -203,10 +207,36 @@ class TeachSessionTab(QWidget):
         super().__init__(parent)
         self._service = TeachSessionService(settings=settings)
         self._compiler = TeachSessionCompiler(session_service=self._service)
+        self._replayer = TeachSessionReplayer(session_service=self._service)
+        self._auto_recorder = AutoTeachRecorder(session_service=self._service)
+        self._active_record_session_id: str | None = None
+        self._record_status = "idle"
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(500)
+        self._poll_timer.timeout.connect(self._poll_recorder_state)
         self._build_ui()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+
+        auto_group = QGroupBox("Auto Recorder")
+        auto_form = QFormLayout(auto_group)
+        self.auto_name_input = QLineEdit()
+        self.auto_name_input.setPlaceholderText("Session name for auto recording")
+        auto_form.addRow("Session name", self.auto_name_input)
+        self.auto_status_label = QLabel("Status: idle")
+        auto_form.addRow("Recorder status", self.auto_status_label)
+        self.start_auto_button = QPushButton("Start Auto Record")
+        self.start_auto_button.clicked.connect(self._start_auto_record)
+        self.stop_auto_button = QPushButton("Stop Auto Record")
+        self.stop_auto_button.clicked.connect(self._stop_auto_record)
+        auto_btn_row = QWidget()
+        auto_btn_layout = QHBoxLayout(auto_btn_row)
+        auto_btn_layout.setContentsMargins(0, 0, 0, 0)
+        auto_btn_layout.addWidget(self.start_auto_button)
+        auto_btn_layout.addWidget(self.stop_auto_button)
+        auto_form.addRow("", auto_btn_row)
+        layout.addWidget(auto_group)
 
         start_group = QGroupBox("Start Session")
         start_form = QFormLayout(start_group)
@@ -311,6 +341,15 @@ class TeachSessionTab(QWidget):
         self.list_button = QPushButton("List Sessions")
         self.list_button.clicked.connect(self._list_sessions)
         actions_form.addRow("", self.list_button)
+
+        self.replay_speed_input = QDoubleSpinBox()
+        self.replay_speed_input.setRange(0.1, 10.0)
+        self.replay_speed_input.setSingleStep(0.1)
+        self.replay_speed_input.setValue(1.0)
+        actions_form.addRow("Replay speed", self.replay_speed_input)
+        self.replay_button = QPushButton("Replay Session")
+        self.replay_button.clicked.connect(self._replay_session)
+        actions_form.addRow("", self.replay_button)
         layout.addWidget(actions_group)
 
         self.result_output = QTextEdit()
@@ -330,6 +369,56 @@ class TeachSessionTab(QWidget):
             return
         self.session_id_input.setText(session.session_id)
         self.result_output.setPlainText(json.dumps(session.model_dump(mode="json"), indent=2))
+
+    def _start_auto_record(self) -> None:
+        if self._auto_recorder.is_recording:
+            QMessageBox.warning(self, "Recorder Busy", "Auto recorder is already running.")
+            return
+        name = self.auto_name_input.text().strip() or self.session_name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Missing Name", "Please provide session name for auto recorder.")
+            return
+        try:
+            session = self._service.start_session(name=name)
+            self._active_record_session_id = session.session_id
+            self.session_id_input.setText(session.session_id)
+            self._auto_recorder.start(session_id=session.session_id)
+            self._record_status = "recording"
+            self.auto_status_label.setText("Status: recording (press ESC to stop)")
+            self._poll_timer.start()
+            self.result_output.setPlainText(json.dumps(session.model_dump(mode="json"), indent=2))
+        except Exception as exc:
+            QMessageBox.critical(self, "Auto Record Failed", str(exc))
+
+    def _stop_auto_record(self) -> None:
+        if not self._auto_recorder.is_recording:
+            QMessageBox.information(self, "Auto Recorder", "Recorder is not running.")
+            return
+        try:
+            self._auto_recorder.stop(finish_session=True)
+            self._record_status = "stopped"
+            self.auto_status_label.setText("Status: stopped")
+            self._poll_timer.stop()
+            if self._active_record_session_id:
+                session = self._service.get_session(session_id=self._active_record_session_id)
+                self.result_output.setPlainText(json.dumps(session.model_dump(mode="json"), indent=2))
+        except Exception as exc:
+            QMessageBox.critical(self, "Stop Failed", str(exc))
+
+    def _poll_recorder_state(self) -> None:
+        if self._record_status != "recording":
+            return
+        if self._auto_recorder.is_recording:
+            return
+        self._record_status = "stopped"
+        self.auto_status_label.setText("Status: stopped")
+        self._poll_timer.stop()
+        if self._active_record_session_id:
+            try:
+                session = self._service.get_session(session_id=self._active_record_session_id)
+            except Exception:
+                return
+            self.result_output.setPlainText(json.dumps(session.model_dump(mode="json"), indent=2))
 
     def _add_event(self) -> None:
         session_id = self.session_id_input.text().strip()
@@ -441,6 +530,27 @@ class TeachSessionTab(QWidget):
             return
         payload = [item.model_dump(mode="json") for item in sessions]
         self.result_output.setPlainText(json.dumps(payload, indent=2))
+
+    def _replay_session(self) -> None:
+        session_id = self.session_id_input.text().strip()
+        if not session_id:
+            QMessageBox.warning(self, "Missing Session ID", "Please provide session id.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Replay",
+            "Replay will control mouse and keyboard on your computer. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            summary = self._replayer.replay(session_id=session_id, speed_factor=float(self.replay_speed_input.value()))
+        except Exception as exc:
+            QMessageBox.critical(self, "Replay Failed", str(exc))
+            return
+        self.result_output.setPlainText(json.dumps(summary.to_dict(), indent=2))
 
 
 class WorkflowToolsTab(QWidget):
