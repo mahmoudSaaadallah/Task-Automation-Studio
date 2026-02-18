@@ -8,6 +8,9 @@ from task_automation_studio.core.teach_models import TeachEventType
 from task_automation_studio.services.teach_sessions import TeachSessionService
 
 
+MODIFIER_NAMES = {"ctrl", "alt", "shift", "cmd"}
+
+
 def _button_to_name(button: Any) -> str:
     name = str(button)
     if "." in name:
@@ -18,11 +21,24 @@ def _button_to_name(button: Any) -> str:
 def _key_to_name(key: Any) -> str:
     char = getattr(key, "char", None)
     if char:
-        return str(char)
+        return str(char).lower()
     name = str(key)
     if name.lower().startswith("key."):
         return name.split(".", 1)[1].lower()
     return name.lower()
+
+
+def _canonical_modifier_name(key_name: str) -> str | None:
+    lowered = key_name.lower()
+    if lowered.startswith("ctrl"):
+        return "ctrl"
+    if lowered.startswith("alt"):
+        return "alt"
+    if lowered.startswith("shift"):
+        return "shift"
+    if lowered.startswith("cmd") or lowered.startswith("win") or lowered.startswith("super"):
+        return "cmd"
+    return None
 
 
 class AutoTeachRecorder:
@@ -40,6 +56,8 @@ class AutoTeachRecorder:
         self._stopped_event = threading.Event()
         self._mouse_listener: Any = None
         self._keyboard_listener: Any = None
+        self._pressed_modifiers: set[str] = set()
+        self._pressed_keys: set[str] = set()
 
     @property
     def is_recording(self) -> bool:
@@ -62,9 +80,11 @@ class AutoTeachRecorder:
             self._running = True
             self._start_ts = time.perf_counter()
             self._stopped_event.clear()
+            self._pressed_modifiers.clear()
+            self._pressed_keys.clear()
 
             self._mouse_listener = mouse.Listener(on_click=self._on_click, on_scroll=self._on_scroll)
-            self._keyboard_listener = keyboard.Listener(on_press=self._on_key_press)
+            self._keyboard_listener = keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release)
             self._mouse_listener.start()
             self._keyboard_listener.start()
 
@@ -132,6 +152,31 @@ class AutoTeachRecorder:
             self.stop(finish_session=True)
             return False
 
+        modifier_name = _canonical_modifier_name(key_name)
+        if modifier_name:
+            self._pressed_modifiers.add(modifier_name)
+            return None
+
+        if key_name in self._pressed_keys:
+            return None
+        self._pressed_keys.add(key_name)
+
+        if self._pressed_modifiers:
+            ordered_modifiers = [m for m in ("ctrl", "alt", "shift", "cmd") if m in self._pressed_modifiers]
+            combo = "+".join([*ordered_modifiers, key_name])
+            self._service.add_event(
+                session_id=session_id,
+                event_type=TeachEventType.HOTKEY,
+                payload={
+                    "key": key_name,
+                    "modifiers": ordered_modifiers,
+                    "combo": combo,
+                    "t_ms": self._elapsed_ms(),
+                },
+                sensitive=False,
+            )
+            return None
+
         self._service.add_event(
             session_id=session_id,
             event_type=TeachEventType.KEY_PRESS,
@@ -139,3 +184,13 @@ class AutoTeachRecorder:
             sensitive=False,
         )
         return None
+
+    def _on_key_release(self, key: Any) -> None:
+        if not self.is_recording:
+            return
+        key_name = _key_to_name(key)
+        modifier_name = _canonical_modifier_name(key_name)
+        if modifier_name:
+            self._pressed_modifiers.discard(modifier_name)
+            return
+        self._pressed_keys.discard(key_name)

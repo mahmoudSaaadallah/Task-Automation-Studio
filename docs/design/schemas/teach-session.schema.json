@@ -30,6 +30,7 @@
               "mouse_click",
               "mouse_scroll",
               "key_press",
+              "hotkey",
               "clipboard_copy",
               "clipboard_paste",
               "window_switch",

@@ -40,6 +40,25 @@ def _key_name_to_key(name: str, keyboard_module: Any) -> Any:
     return normalized
 
 
+def _modifier_name_to_key(name: str, keyboard_module: Any) -> Any:
+    normalized = name.lower()
+    if normalized == "ctrl":
+        key = getattr(keyboard_module.Key, "ctrl", None) or getattr(keyboard_module.Key, "ctrl_l", None)
+        return key
+    if normalized == "alt":
+        key = getattr(keyboard_module.Key, "alt", None) or getattr(keyboard_module.Key, "alt_l", None)
+        return key
+    if normalized == "shift":
+        key = getattr(keyboard_module.Key, "shift", None) or getattr(keyboard_module.Key, "shift_l", None)
+        return key
+    if normalized == "cmd":
+        key = getattr(keyboard_module.Key, "cmd", None)
+        if key is None:
+            key = getattr(keyboard_module.Key, "cmd_l", None)
+        return key
+    return None
+
+
 @dataclass(slots=True)
 class ReplaySummary:
     session_id: str
@@ -142,6 +161,28 @@ class TeachSessionReplayer:
             key = _key_name_to_key(key_name, keyboard_module)
             keyboard_controller.press(key)
             keyboard_controller.release(key)
+            return True
+
+        if event.event_type == TeachEventType.HOTKEY:
+            key_name = str(event.payload.get("key", "")).lower()
+            modifiers_payload = event.payload.get("modifiers", [])
+            if not key_name or not isinstance(modifiers_payload, list):
+                return False
+
+            pressed_modifiers: list[Any] = []
+            for modifier_name in [str(item).lower() for item in modifiers_payload]:
+                modifier_key = _modifier_name_to_key(modifier_name, keyboard_module)
+                if modifier_key is None:
+                    continue
+                keyboard_controller.press(modifier_key)
+                pressed_modifiers.append(modifier_key)
+
+            target_key = _key_name_to_key(key_name, keyboard_module)
+            keyboard_controller.press(target_key)
+            keyboard_controller.release(target_key)
+
+            for modifier_key in reversed(pressed_modifiers):
+                keyboard_controller.release(modifier_key)
             return True
 
         return False

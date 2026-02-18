@@ -20,6 +20,7 @@ class TeachEventType(StrEnum):
     MOUSE_CLICK = "mouse_click"
     MOUSE_SCROLL = "mouse_scroll"
     KEY_PRESS = "key_press"
+    HOTKEY = "hotkey"
     CLIPBOARD_COPY = "clipboard_copy"
     CLIPBOARD_PASTE = "clipboard_paste"
     WINDOW_SWITCH = "window_switch"
