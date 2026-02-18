@@ -105,6 +105,7 @@ class ReplaySummary:
     skipped_events: int
     speed_factor: float
     stopped_by_user: bool
+    diagnostics: list[dict[str, object]]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -113,7 +114,15 @@ class ReplaySummary:
             "skipped_events": self.skipped_events,
             "speed_factor": self.speed_factor,
             "stopped_by_user": self.stopped_by_user,
+            "diagnostics": self.diagnostics,
         }
+
+
+@dataclass(slots=True)
+class EventApplyResult:
+    applied: bool
+    reason: str
+    details: dict[str, object]
 
 
 class TeachSessionReplayer:
@@ -137,6 +146,7 @@ class TeachSessionReplayer:
                 skipped_events=0,
                 speed_factor=1.0,
                 stopped_by_user=False,
+                diagnostics=[],
             )
 
         safe_speed = _normalize_speed_factor(speed_factor)
@@ -155,6 +165,7 @@ class TeachSessionReplayer:
 
         replayed_count = 0
         skipped_count = 0
+        diagnostics: list[dict[str, object]] = []
         previous_time = _event_time_ms(events[0])
 
         for event in events:
@@ -167,14 +178,23 @@ class TeachSessionReplayer:
                     break
             previous_time = current_time
 
-            applied = self._apply_event(
+            result = self._apply_event(
                 event=event,
                 mouse_module=mouse,
                 keyboard_module=keyboard,
                 mouse_controller=mouse_controller,
                 keyboard_controller=keyboard_controller,
             )
-            if applied:
+            diagnostics.append(
+                {
+                    "event_id": event.event_id,
+                    "event_type": event.event_type.value,
+                    "applied": result.applied,
+                    "reason": result.reason,
+                    "details": result.details,
+                }
+            )
+            if result.applied:
                 replayed_count += 1
             else:
                 skipped_count += 1
@@ -186,6 +206,7 @@ class TeachSessionReplayer:
             skipped_events=skipped_count,
             speed_factor=safe_speed,
             stopped_by_user=stop_event.is_set(),
+            diagnostics=diagnostics,
         )
 
     def _apply_event(
@@ -196,7 +217,7 @@ class TeachSessionReplayer:
         keyboard_module: Any,
         mouse_controller: Any,
         keyboard_controller: Any,
-    ) -> bool:
+    ) -> EventApplyResult:
         if event.event_type == TeachEventType.MOUSE_CLICK:
             return self._run_mouse_click_agent(
                 event=event,
@@ -212,7 +233,7 @@ class TeachSessionReplayer:
             dx = int(event.payload.get("dx", 0))
             dy = int(event.payload.get("dy", 0))
             mouse_controller.scroll(dx, dy)
-            return True
+            return EventApplyResult(applied=True, reason="scroll_applied", details={"dx": dx, "dy": dy})
 
         if event.event_type == TeachEventType.KEY_PRESS:
             return self._run_key_press_agent(
@@ -228,9 +249,15 @@ class TeachSessionReplayer:
                 keyboard_controller=keyboard_controller,
             )
 
-        return False
+        return EventApplyResult(
+            applied=False,
+            reason="unsupported_event_type",
+            details={"event_type": event.event_type.value},
+        )
 
-    def _run_mouse_click_agent(self, *, event: TeachEventData, mouse_module: Any, mouse_controller: Any) -> bool:
+    def _run_mouse_click_agent(
+        self, *, event: TeachEventData, mouse_module: Any, mouse_controller: Any
+    ) -> EventApplyResult:
         button_name = str(event.payload.get("button", "left")).lower()
         registry = AgentSkillRegistry()
         registry.register(
@@ -333,7 +360,9 @@ class TeachSessionReplayer:
 
         return self._execute_agent_goal(event=event, goal=goal, registry=registry)
 
-    def _run_key_press_agent(self, *, event: TeachEventData, keyboard_module: Any, keyboard_controller: Any) -> bool:
+    def _run_key_press_agent(
+        self, *, event: TeachEventData, keyboard_module: Any, keyboard_controller: Any
+    ) -> EventApplyResult:
         registry = AgentSkillRegistry()
         registry.register(
             SkillDescriptor(
@@ -427,7 +456,9 @@ class TeachSessionReplayer:
         )
         return self._execute_agent_goal(event=event, goal=goal, registry=registry)
 
-    def _run_hotkey_agent(self, *, event: TeachEventData, keyboard_module: Any, keyboard_controller: Any) -> bool:
+    def _run_hotkey_agent(
+        self, *, event: TeachEventData, keyboard_module: Any, keyboard_controller: Any
+    ) -> EventApplyResult:
         registry = AgentSkillRegistry()
         registry.register(
             SkillDescriptor(
@@ -540,13 +571,34 @@ class TeachSessionReplayer:
         )
         return self._execute_agent_goal(event=event, goal=goal, registry=registry)
 
-    def _execute_agent_goal(self, *, event: TeachEventData, goal: AgentGoal, registry: AgentSkillRegistry) -> bool:
+    def _execute_agent_goal(
+        self, *, event: TeachEventData, goal: AgentGoal, registry: AgentSkillRegistry
+    ) -> EventApplyResult:
         planner = GoalPlanner(skill_registry=registry)
         plan = planner.build_plan(goal=goal, state=AgentState())
         runtime = AgentRuntime(skills=registry)
         summary = runtime.run(goal=goal, plan=plan, state=AgentState())
         self._log_agent_summary(event=event, summary=summary)
-        return summary.completed
+        if summary.completed:
+            return EventApplyResult(
+                applied=True,
+                reason="agent_completed",
+                details={"traces": len(summary.traces)},
+            )
+
+        last_trace_message = ""
+        if summary.traces:
+            last_trace_message = summary.traces[-1].message
+        return EventApplyResult(
+            applied=False,
+            reason="agent_failed",
+            details={
+                "failed_step_id": summary.failed_step_id,
+                "completed_steps": summary.completed_steps,
+                "trace_count": len(summary.traces),
+                "last_trace_message": last_trace_message,
+            },
+        )
 
     def _log_agent_summary(self, *, event: TeachEventData, summary: AgentRunSummary) -> None:
         level = logging.INFO if summary.completed else logging.WARNING

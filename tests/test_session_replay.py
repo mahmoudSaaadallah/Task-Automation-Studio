@@ -95,7 +95,7 @@ def test_apply_hotkey_event() -> None:
     mouse_controller = _MouseControllerStub()
 
     replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
-    applied = replayer._apply_event(  # type: ignore[attr-defined]
+    result = replayer._apply_event(  # type: ignore[attr-defined]
         event=event,
         mouse_module=_MouseStub,
         keyboard_module=_KeyStub,
@@ -103,7 +103,7 @@ def test_apply_hotkey_event() -> None:
         keyboard_controller=keyboard_controller,
     )
 
-    assert applied is True
+    assert result.applied is True
     assert keyboard_controller.actions == [
         ("press", "CTRL"),
         ("press", "v"),
@@ -123,14 +123,14 @@ def test_apply_key_press_event() -> None:
     mouse_controller = _MouseControllerStub()
     replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
 
-    applied = replayer._apply_event(  # type: ignore[attr-defined]
+    result = replayer._apply_event(  # type: ignore[attr-defined]
         event=event,
         mouse_module=_MouseStub,
         keyboard_module=_KeyStub,
         mouse_controller=mouse_controller,
         keyboard_controller=keyboard_controller,
     )
-    assert applied is True
+    assert result.applied is True
     assert keyboard_controller.actions == [("press", "a"), ("release", "a")]
 
 
@@ -145,14 +145,14 @@ def test_apply_key_press_event_rejects_escape() -> None:
     mouse_controller = _MouseControllerStub()
     replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
 
-    applied = replayer._apply_event(  # type: ignore[attr-defined]
+    result = replayer._apply_event(  # type: ignore[attr-defined]
         event=event,
         mouse_module=_MouseStub,
         keyboard_module=_KeyStub,
         mouse_controller=mouse_controller,
         keyboard_controller=keyboard_controller,
     )
-    assert applied is False
+    assert result.applied is False
     assert keyboard_controller.actions == []
 
 
@@ -181,7 +181,7 @@ def test_apply_mouse_click_prefers_smart_locator() -> None:
         keyboard_controller = _KeyboardControllerStub()
         mouse_controller = _MouseControllerCapture()
         replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
-        applied = replayer._apply_event(  # type: ignore[attr-defined]
+        result = replayer._apply_event(  # type: ignore[attr-defined]
             event=event,
             mouse_module=_MouseStub,
             keyboard_module=_KeyStub,
@@ -191,7 +191,7 @@ def test_apply_mouse_click_prefers_smart_locator() -> None:
     finally:
         sr.resolve_smart_click_position = original  # type: ignore[assignment]
 
-    assert applied is True
+    assert result.applied is True
     assert mouse_controller.position == (44, 66)
     assert mouse_controller.clicked is True
 
@@ -216,7 +216,7 @@ def test_apply_mouse_click_fails_without_target() -> None:
     keyboard_controller = _KeyboardControllerStub()
     mouse_controller = _MouseControllerCapture()
     replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
-    applied = replayer._apply_event(  # type: ignore[attr-defined]
+    result = replayer._apply_event(  # type: ignore[attr-defined]
         event=event,
         mouse_module=_MouseStub,
         keyboard_module=_KeyStub,
@@ -224,7 +224,7 @@ def test_apply_mouse_click_fails_without_target() -> None:
         keyboard_controller=keyboard_controller,
     )
 
-    assert applied is False
+    assert result.applied is False
     assert mouse_controller.clicked is False
 
 
@@ -243,14 +243,14 @@ def test_apply_hotkey_event_invalid_payload() -> None:
     mouse_controller = _MouseControllerStub()
     replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
 
-    applied = replayer._apply_event(  # type: ignore[attr-defined]
+    result = replayer._apply_event(  # type: ignore[attr-defined]
         event=event,
         mouse_module=_MouseStub,
         keyboard_module=_KeyStub,
         mouse_controller=mouse_controller,
         keyboard_controller=keyboard_controller,
     )
-    assert applied is False
+    assert result.applied is False
     assert keyboard_controller.actions == []
 
 
