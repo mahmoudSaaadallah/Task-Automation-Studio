@@ -296,7 +296,7 @@ class TeachSessionReplayer:
                 skill_id="ui_locate_click",
                 name="Locate click target",
                 supported_intents=["locate_target"],
-                required_inputs=["event_payload"],
+                required_inputs=["event_payload", "button_name"],
                 default_success_signals=["target_located"],
                 reliability_score=0.9,
             )

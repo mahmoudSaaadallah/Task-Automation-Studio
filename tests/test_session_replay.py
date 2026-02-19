@@ -198,6 +198,46 @@ def test_apply_mouse_click_prefers_smart_locator() -> None:
     assert mouse_controller.clicked is True
 
 
+def test_apply_mouse_click_preserves_right_button() -> None:
+    event = TeachEventData(
+        event_id="e_click_right",
+        event_type=TeachEventType.MOUSE_CLICK,
+        payload={"x": 10, "y": 20, "button": "right", "smart_locator": {"version": 1, "anchors": []}},
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    class _MouseControllerCapture(_MouseControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.clicked_button = None
+
+        def click(self, button, count):  # type: ignore[no-untyped-def]
+            del count
+            self.clicked_button = button
+            return None
+
+    from task_automation_studio.services import session_replay as sr
+
+    original = sr.resolve_smart_click_position
+    sr.resolve_smart_click_position = lambda _payload: (44, 66)  # type: ignore[assignment]
+    try:
+        keyboard_controller = _KeyboardControllerStub()
+        mouse_controller = _MouseControllerCapture()
+        replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
+        result = replayer._apply_event(  # type: ignore[attr-defined]
+            event=event,
+            mouse_module=_MouseStub,
+            keyboard_module=_KeyStub,
+            mouse_controller=mouse_controller,
+            keyboard_controller=keyboard_controller,
+        )
+    finally:
+        sr.resolve_smart_click_position = original  # type: ignore[assignment]
+
+    assert result.applied is True
+    assert mouse_controller.clicked_button == "RIGHT"
+
+
 def test_apply_mouse_click_fails_without_target() -> None:
     event = TeachEventData(
         event_id="e_click_missing",
