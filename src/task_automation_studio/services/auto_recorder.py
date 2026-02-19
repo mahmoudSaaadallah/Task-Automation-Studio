@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any
@@ -11,6 +12,7 @@ from task_automation_studio.services.teach_sessions import TeachSessionService
 
 
 MODIFIER_NAMES = {"ctrl", "alt", "shift", "cmd"}
+LOGGER = logging.getLogger("task_automation_studio")
 
 
 def _button_to_name(button: Any) -> str:
@@ -117,96 +119,115 @@ class AutoTeachRecorder:
         return int((time.perf_counter() - self._start_ts) * 1000)
 
     def _on_click(self, x: int, y: int, button: Any, pressed: bool) -> None:
-        if not pressed or not self.is_recording:
-            return
-        session_id = self._session_id
-        if not session_id:
-            return
+        try:
+            if not pressed or not self.is_recording:
+                return
+            session_id = self._session_id
+            if not session_id:
+                return
 
-        event_id = uuid4().hex
-        payload: dict[str, Any] = {"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()}
-        smart_locator = self._capture_smart_locator(session_id=session_id, event_id=event_id, x=x, y=y)
-        if smart_locator is not None:
-            payload["smart_locator"] = smart_locator
-        window_context = self._active_window_context()
-        if window_context is not None:
-            payload["window_context"] = window_context
+            event_id = uuid4().hex
+            payload: dict[str, Any] = {"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()}
+            try:
+                smart_locator = self._capture_smart_locator(session_id=session_id, event_id=event_id, x=x, y=y)
+                if smart_locator is not None:
+                    payload["smart_locator"] = smart_locator
+            except Exception:
+                LOGGER.exception("Auto recorder smart locator capture failed; falling back to basic mouse click payload.")
+            try:
+                window_context = self._active_window_context()
+                if window_context is not None:
+                    payload["window_context"] = window_context
+            except Exception:
+                LOGGER.exception("Auto recorder window context capture failed; continuing without context.")
 
-        self._service.add_event(
-            session_id=session_id,
-            event_type=TeachEventType.MOUSE_CLICK,
-            payload=payload,
-            event_id=event_id,
-            sensitive=False,
-        )
-
-    def _on_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
-        if not self.is_recording:
-            return
-        session_id = self._session_id
-        if not session_id:
-            return
-        self._service.add_event(
-            session_id=session_id,
-            event_type=TeachEventType.MOUSE_SCROLL,
-            payload={"x": x, "y": y, "dx": dx, "dy": dy, "t_ms": self._elapsed_ms()},
-            sensitive=False,
-        )
-
-    def _on_key_press(self, key: Any) -> bool | None:
-        if not self.is_recording:
-            return None
-        session_id = self._session_id
-        if not session_id:
-            return None
-
-        key_name = _key_to_name(key)
-        if key_name == "esc":
-            self.stop(finish_session=True)
-            return False
-
-        modifier_name = _canonical_modifier_name(key_name)
-        if modifier_name:
-            self._pressed_modifiers.add(modifier_name)
-            return None
-
-        if key_name in self._pressed_keys:
-            return None
-        self._pressed_keys.add(key_name)
-
-        if self._pressed_modifiers:
-            ordered_modifiers = [m for m in ("ctrl", "alt", "shift", "cmd") if m in self._pressed_modifiers]
-            combo = "+".join([*ordered_modifiers, key_name])
             self._service.add_event(
                 session_id=session_id,
-                event_type=TeachEventType.HOTKEY,
-                payload={
-                    "key": key_name,
-                    "modifiers": ordered_modifiers,
-                    "combo": combo,
-                    "t_ms": self._elapsed_ms(),
-                },
+                event_type=TeachEventType.MOUSE_CLICK,
+                payload=payload,
+                event_id=event_id,
+                sensitive=False,
+            )
+        except Exception:
+            LOGGER.exception("Auto recorder mouse click callback failed.")
+
+    def _on_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
+        try:
+            if not self.is_recording:
+                return
+            session_id = self._session_id
+            if not session_id:
+                return
+            self._service.add_event(
+                session_id=session_id,
+                event_type=TeachEventType.MOUSE_SCROLL,
+                payload={"x": x, "y": y, "dx": dx, "dy": dy, "t_ms": self._elapsed_ms()},
+                sensitive=False,
+            )
+        except Exception:
+            LOGGER.exception("Auto recorder mouse scroll callback failed.")
+
+    def _on_key_press(self, key: Any) -> bool | None:
+        try:
+            if not self.is_recording:
+                return None
+            session_id = self._session_id
+            if not session_id:
+                return None
+
+            key_name = _key_to_name(key)
+            if key_name == "esc":
+                self.stop(finish_session=True)
+                return False
+
+            modifier_name = _canonical_modifier_name(key_name)
+            if modifier_name:
+                self._pressed_modifiers.add(modifier_name)
+                return None
+
+            if key_name in self._pressed_keys:
+                return None
+            self._pressed_keys.add(key_name)
+
+            if self._pressed_modifiers:
+                ordered_modifiers = [m for m in ("ctrl", "alt", "shift", "cmd") if m in self._pressed_modifiers]
+                combo = "+".join([*ordered_modifiers, key_name])
+                self._service.add_event(
+                    session_id=session_id,
+                    event_type=TeachEventType.HOTKEY,
+                    payload={
+                        "key": key_name,
+                        "modifiers": ordered_modifiers,
+                        "combo": combo,
+                        "t_ms": self._elapsed_ms(),
+                    },
+                    sensitive=False,
+                )
+                return None
+
+            self._service.add_event(
+                session_id=session_id,
+                event_type=TeachEventType.KEY_PRESS,
+                payload={"key": key_name, "t_ms": self._elapsed_ms()},
                 sensitive=False,
             )
             return None
-
-        self._service.add_event(
-            session_id=session_id,
-            event_type=TeachEventType.KEY_PRESS,
-            payload={"key": key_name, "t_ms": self._elapsed_ms()},
-            sensitive=False,
-        )
-        return None
+        except Exception:
+            LOGGER.exception("Auto recorder key press callback failed.")
+            return None
 
     def _on_key_release(self, key: Any) -> None:
-        if not self.is_recording:
-            return
-        key_name = _key_to_name(key)
-        modifier_name = _canonical_modifier_name(key_name)
-        if modifier_name:
-            self._pressed_modifiers.discard(modifier_name)
-            return
-        self._pressed_keys.discard(key_name)
+        try:
+            if not self.is_recording:
+                return
+            key_name = _key_to_name(key)
+            modifier_name = _canonical_modifier_name(key_name)
+            if modifier_name:
+                self._pressed_modifiers.discard(modifier_name)
+                return
+            self._pressed_keys.discard(key_name)
+        except Exception:
+            LOGGER.exception("Auto recorder key release callback failed.")
 
     def _capture_smart_locator(
         self, *, session_id: str, event_id: str, x: int, y: int

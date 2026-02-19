@@ -30,6 +30,11 @@ class _FakeSessionService:
         return Path("artifacts")
 
 
+class _FailingSessionService(_FakeSessionService):
+    def add_event(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("db locked")
+
+
 def test_button_to_name() -> None:
     assert _button_to_name("Button.left") == "left"
     assert _button_to_name("left") == "left"
@@ -82,3 +87,16 @@ def test_mouse_click_records_smart_locator_payload() -> None:
     assert payload["smart_locator"]["version"] == 1
     assert payload["window_context"]["title"] == "Example"
     assert event["event_id"]
+
+
+def test_mouse_click_callback_does_not_raise_when_add_event_fails() -> None:
+    service = _FailingSessionService()
+    recorder = AutoTeachRecorder(session_service=service)
+    recorder._session_id = "session-1"  # type: ignore[attr-defined]
+    recorder._running = True  # type: ignore[attr-defined]
+    recorder._start_ts = time.perf_counter()  # type: ignore[attr-defined]
+    recorder._capture_smart_locator = lambda **_kwargs: None  # type: ignore[method-assign, assignment]
+    recorder._active_window_context = lambda: None  # type: ignore[method-assign, assignment]
+
+    recorder._on_click(100, 200, "Button.left", True)  # type: ignore[attr-defined]
+    recorder._on_key_press(_FakeKey(char="a"))  # type: ignore[attr-defined]
