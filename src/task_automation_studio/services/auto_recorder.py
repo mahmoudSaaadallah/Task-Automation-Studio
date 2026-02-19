@@ -13,6 +13,8 @@ from task_automation_studio.services.teach_sessions import TeachSessionService
 
 MODIFIER_NAMES = {"ctrl", "alt", "shift", "cmd"}
 LOGGER = logging.getLogger("task_automation_studio")
+DOUBLE_CLICK_INTERVAL_SECONDS = 0.35
+DOUBLE_CLICK_RADIUS_PX = 8
 
 
 def _button_to_name(button: Any) -> str:
@@ -62,6 +64,8 @@ class AutoTeachRecorder:
         self._keyboard_listener: Any = None
         self._pressed_modifiers: set[str] = set()
         self._pressed_keys: set[str] = set()
+        self._pending_click: dict[str, Any] | None = None
+        self._pending_click_timer: threading.Timer | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -86,6 +90,7 @@ class AutoTeachRecorder:
             self._stopped_event.clear()
             self._pressed_modifiers.clear()
             self._pressed_keys.clear()
+            self._clear_pending_click_locked()
 
             self._mouse_listener = mouse.Listener(on_click=self._on_click, on_scroll=self._on_scroll)
             self._keyboard_listener = keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release)
@@ -93,6 +98,7 @@ class AutoTeachRecorder:
             self._keyboard_listener.start()
 
     def stop(self, *, finish_session: bool = True) -> None:
+        self._flush_pending_click()
         with self._lock:
             if not self._running:
                 return
@@ -122,37 +128,55 @@ class AutoTeachRecorder:
         try:
             if not pressed or not self.is_recording:
                 return
-            session_id = self._session_id
-            if not session_id:
-                return
+            now_ms = self._elapsed_ms()
+            button_name = _button_to_name(button)
+            emit_single: dict[str, Any] | None = None
+            emit_double: dict[str, Any] | None = None
 
-            event_id = uuid4().hex
-            payload: dict[str, Any] = {"x": x, "y": y, "button": _button_to_name(button), "t_ms": self._elapsed_ms()}
-            try:
-                smart_locator = self._capture_smart_locator(session_id=session_id, event_id=event_id, x=x, y=y)
-                if smart_locator is not None:
-                    payload["smart_locator"] = smart_locator
-            except Exception:
-                LOGGER.exception("Auto recorder smart locator capture failed; falling back to basic mouse click payload.")
-            try:
-                window_context = self._active_window_context()
-                if window_context is not None:
-                    payload["window_context"] = window_context
-            except Exception:
-                LOGGER.exception("Auto recorder window context capture failed; continuing without context.")
+            with self._lock:
+                if not self._running or not self._session_id:
+                    return
 
-            self._service.add_event(
-                session_id=session_id,
-                event_type=TeachEventType.MOUSE_CLICK,
-                payload=payload,
-                event_id=event_id,
-                sensitive=False,
-            )
+                pending = self._pending_click
+                if pending and self._is_double_click_candidate(
+                    pending=pending,
+                    x=x,
+                    y=y,
+                    button_name=button_name,
+                    now_ms=now_ms,
+                ):
+                    self._cancel_pending_click_timer_locked()
+                    self._pending_click = None
+                    emit_double = {
+                        "x": x,
+                        "y": y,
+                        "button": button_name,
+                        "t_ms": pending["t_ms"],
+                        "click_count": 2,
+                    }
+                else:
+                    if pending is not None:
+                        self._cancel_pending_click_timer_locked()
+                        emit_single = dict(pending)
+                    self._pending_click = {
+                        "x": x,
+                        "y": y,
+                        "button": button_name,
+                        "t_ms": now_ms,
+                        "click_count": 1,
+                    }
+                    self._arm_pending_click_timer_locked()
+
+            if emit_single is not None:
+                self._emit_mouse_click(dict(emit_single))
+            if emit_double is not None:
+                self._emit_mouse_click(dict(emit_double))
         except Exception:
             LOGGER.exception("Auto recorder mouse click callback failed.")
 
     def _on_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
         try:
+            self._flush_pending_click()
             if not self.is_recording:
                 return
             session_id = self._session_id
@@ -239,6 +263,90 @@ class AutoTeachRecorder:
             x=x,
             y=y,
         )
+
+    def _emit_mouse_click(self, payload: dict[str, Any]) -> None:
+        session_id = self._session_id
+        if not session_id:
+            return
+        x = int(payload.get("x", 0))
+        y = int(payload.get("y", 0))
+        event_id = uuid4().hex
+        enriched = dict(payload)
+        try:
+            smart_locator = self._capture_smart_locator(session_id=session_id, event_id=event_id, x=x, y=y)
+            if smart_locator is not None:
+                enriched["smart_locator"] = smart_locator
+        except Exception:
+            LOGGER.exception("Auto recorder smart locator capture failed; falling back to basic mouse click payload.")
+        try:
+            window_context = self._active_window_context()
+            if window_context is not None:
+                enriched["window_context"] = window_context
+        except Exception:
+            LOGGER.exception("Auto recorder window context capture failed; continuing without context.")
+        self._service.add_event(
+            session_id=session_id,
+            event_type=TeachEventType.MOUSE_CLICK,
+            payload=enriched,
+            event_id=event_id,
+            sensitive=False,
+        )
+
+    def _is_double_click_candidate(
+        self,
+        *,
+        pending: dict[str, Any],
+        x: int,
+        y: int,
+        button_name: str,
+        now_ms: int,
+    ) -> bool:
+        if str(pending.get("button", "")).lower() != button_name.lower():
+            return False
+        pending_t = pending.get("t_ms")
+        if not isinstance(pending_t, int):
+            return False
+        if now_ms - pending_t > int(DOUBLE_CLICK_INTERVAL_SECONDS * 1000):
+            return False
+        px = pending.get("x")
+        py = pending.get("y")
+        if not isinstance(px, int) or not isinstance(py, int):
+            return False
+        dx = px - x
+        dy = py - y
+        return dx * dx + dy * dy <= DOUBLE_CLICK_RADIUS_PX * DOUBLE_CLICK_RADIUS_PX
+
+    def _arm_pending_click_timer_locked(self) -> None:
+        self._cancel_pending_click_timer_locked()
+        timer = threading.Timer(DOUBLE_CLICK_INTERVAL_SECONDS, self._flush_pending_click)
+        timer.daemon = True
+        self._pending_click_timer = timer
+        timer.start()
+
+    def _cancel_pending_click_timer_locked(self) -> None:
+        timer = self._pending_click_timer
+        self._pending_click_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _clear_pending_click_locked(self) -> None:
+        self._cancel_pending_click_timer_locked()
+        self._pending_click = None
+
+    def _flush_pending_click(self) -> None:
+        pending: dict[str, Any] | None = None
+        with self._lock:
+            if self._pending_click is None:
+                self._cancel_pending_click_timer_locked()
+                return
+            pending = dict(self._pending_click)
+            self._pending_click = None
+            self._cancel_pending_click_timer_locked()
+        if pending is not None:
+            try:
+                self._emit_mouse_click(pending)
+            except Exception:
+                LOGGER.exception("Auto recorder pending click flush failed.")
 
     def _active_window_context(self) -> dict[str, object] | None:
         try:

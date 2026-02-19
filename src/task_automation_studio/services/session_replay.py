@@ -296,7 +296,7 @@ class TeachSessionReplayer:
                 skill_id="ui_locate_click",
                 name="Locate click target",
                 supported_intents=["locate_target"],
-                required_inputs=["event_payload", "button_name"],
+                required_inputs=["event_payload", "button_name", "click_count"],
                 default_success_signals=["target_located"],
                 reliability_score=0.9,
             )
@@ -334,12 +334,15 @@ class TeachSessionReplayer:
             state.variables["target_x"] = target[0]
             state.variables["target_y"] = target[1]
             state.variables["button_name"] = str(step.input_bindings.get("button_name", "left")).lower()
+            raw_click_count = step.input_bindings.get("click_count", 1)
+            click_count = int(raw_click_count) if isinstance(raw_click_count, int) else 1
+            state.variables["click_count"] = max(1, click_count)
             return {
                 "success": True,
                 "verified": True,
                 "message": "Target located.",
                 "signals": ["target_located"],
-                "state_updates": {"target_x": target[0], "target_y": target[1]},
+                "state_updates": {"target_x": target[0], "target_y": target[1], "click_count": state.variables["click_count"]},
                 "evidence": {"target": target},
             }
 
@@ -350,15 +353,18 @@ class TeachSessionReplayer:
             if not isinstance(target_x, int) or not isinstance(target_y, int):
                 return {"success": False, "verified": False, "message": "Target coordinates are missing.", "signals": []}
             click_button_name = str(state.variables.get("button_name", button_name))
+            click_count = state.variables.get("click_count", 1)
+            if not isinstance(click_count, int) or click_count < 1:
+                click_count = 1
             mouse_controller.position = (target_x, target_y)
-            mouse_controller.click(_button_name_to_key(click_button_name, mouse_module), 1)
+            mouse_controller.click(_button_name_to_key(click_button_name, mouse_module), click_count)
             return {
                 "success": True,
                 "verified": True,
                 "message": "Click applied.",
                 "signals": ["click_applied"],
                 "state_updates": {"click_applied": True},
-                "evidence": {"clicked_point": [target_x, target_y], "button": click_button_name},
+                "evidence": {"clicked_point": [target_x, target_y], "button": click_button_name, "click_count": click_count},
             }
 
         def _verify_handler(**kwargs):  # type: ignore[no-untyped-def]
@@ -385,7 +391,11 @@ class TeachSessionReplayer:
             name="Replay mouse click",
             goal_type=AgentGoalType.REPETITIVE_TASK,
             requested_intents=["locate_target", "apply_action", "verify_outcome"],
-            inputs={"event_payload": event.payload, "button_name": button_name},
+            inputs={
+                "event_payload": event.payload,
+                "button_name": button_name,
+                "click_count": int(event.payload.get("click_count", 1)) if isinstance(event.payload.get("click_count", 1), int) else 1,
+            },
             success_criteria=["click_verified"],
         )
 

@@ -77,6 +77,7 @@ def test_mouse_click_records_smart_locator_payload() -> None:
     recorder._active_window_context = lambda: {"title": "Example"}  # type: ignore[method-assign, assignment]
 
     recorder._on_click(100, 200, "Button.left", True)  # type: ignore[attr-defined]
+    recorder._flush_pending_click()  # type: ignore[attr-defined]
 
     assert len(service.events) == 1
     event = service.events[0]
@@ -100,3 +101,23 @@ def test_mouse_click_callback_does_not_raise_when_add_event_fails() -> None:
 
     recorder._on_click(100, 200, "Button.left", True)  # type: ignore[attr-defined]
     recorder._on_key_press(_FakeKey(char="a"))  # type: ignore[attr-defined]
+
+
+def test_double_click_records_click_count_two() -> None:
+    service = _FakeSessionService()
+    recorder = AutoTeachRecorder(session_service=service)
+    recorder._session_id = "session-1"  # type: ignore[attr-defined]
+    recorder._running = True  # type: ignore[attr-defined]
+    recorder._start_ts = time.perf_counter()  # type: ignore[attr-defined]
+    recorder._capture_smart_locator = lambda **_kwargs: None  # type: ignore[method-assign, assignment]
+    recorder._active_window_context = lambda: None  # type: ignore[method-assign, assignment]
+
+    recorder._on_click(100, 200, "Button.left", True)  # type: ignore[attr-defined]
+    recorder._on_click(101, 201, "Button.left", True)  # type: ignore[attr-defined]
+
+    assert len(service.events) == 1
+    event = service.events[0]
+    assert event["event_type"] == TeachEventType.MOUSE_CLICK
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    assert payload["click_count"] == 2

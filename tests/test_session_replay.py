@@ -238,6 +238,38 @@ def test_apply_mouse_click_preserves_right_button() -> None:
     assert mouse_controller.clicked_button == "RIGHT"
 
 
+def test_apply_mouse_click_uses_click_count() -> None:
+    event = TeachEventData(
+        event_id="e_click_double",
+        event_type=TeachEventType.MOUSE_CLICK,
+        payload={"x": 10, "y": 20, "button": "left", "click_count": 2},
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    class _MouseControllerCapture(_MouseControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.clicked_count = 0
+
+        def click(self, _button, count):  # type: ignore[no-untyped-def]
+            self.clicked_count = count
+            return None
+
+    keyboard_controller = _KeyboardControllerStub()
+    mouse_controller = _MouseControllerCapture()
+    replayer = TeachSessionReplayer(session_service=None)  # type: ignore[arg-type]
+    result = replayer._apply_event(  # type: ignore[attr-defined]
+        event=event,
+        mouse_module=_MouseStub,
+        keyboard_module=_KeyStub,
+        mouse_controller=mouse_controller,
+        keyboard_controller=keyboard_controller,
+    )
+
+    assert result.applied is True
+    assert mouse_controller.clicked_count == 2
+
+
 def test_apply_mouse_click_fails_without_target() -> None:
     event = TeachEventData(
         event_id="e_click_missing",
