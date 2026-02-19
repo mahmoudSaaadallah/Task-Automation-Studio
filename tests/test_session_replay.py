@@ -10,6 +10,7 @@ from task_automation_studio.services.session_replay import (
     _is_escape_key,
     _key_name_to_key,
     _modifier_name_to_key,
+    _normalize_repeat_count,
     _normalize_speed_factor,
     _resolve_click_target,
     _sleep_with_stop,
@@ -60,6 +61,12 @@ def test_normalize_speed_factor() -> None:
     assert _normalize_speed_factor(1.5) == 1.5
     assert _normalize_speed_factor(0) == 1.0
     assert _normalize_speed_factor(99) == 10.0
+
+
+def test_normalize_repeat_count() -> None:
+    assert _normalize_repeat_count(1) == 1
+    assert _normalize_repeat_count(0) == 1
+    assert _normalize_repeat_count(-5) == 1
 
 
 def test_event_time_ms_prefers_payload() -> None:
@@ -355,6 +362,8 @@ def test_replay_summary_to_dict_includes_diagnostics() -> None:
         replayed_events=2,
         skipped_events=1,
         speed_factor=1.0,
+        repeat_count=2,
+        completed_loops=1,
         stopped_by_user=False,
         diagnostics=[{"event_id": "e1", "applied": False, "reason": "agent_failed", "details": {}}],
     )
@@ -376,6 +385,8 @@ def test_save_diagnostics_writes_json(tmp_path: Path) -> None:
         replayed_events=1,
         skipped_events=0,
         speed_factor=1.0,
+        repeat_count=1,
+        completed_loops=1,
         stopped_by_user=False,
         diagnostics=[{"event_id": "e2", "applied": True, "reason": "ok", "details": {}}],
     )

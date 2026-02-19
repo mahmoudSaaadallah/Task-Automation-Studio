@@ -48,4 +48,13 @@ def test_parser_supports_teach_replay() -> None:
     args = parser.parse_args(["teach", "replay", "--session-id", "abc123", "--speed-factor", "2"])
     assert args.command == "teach"
     assert args.teach_command == "replay"
+    assert args.repeat_count == 1
     assert args.diagnostics_file == ""
+
+
+def test_parser_supports_teach_replay_repeat_count() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["teach", "replay", "--session-id", "abc123", "--repeat-count", "5"])
+    assert args.command == "teach"
+    assert args.teach_command == "replay"
+    assert args.repeat_count == 5

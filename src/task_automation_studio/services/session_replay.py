@@ -26,6 +26,12 @@ def _normalize_speed_factor(value: float) -> float:
     return min(value, 10.0)
 
 
+def _normalize_repeat_count(value: int) -> int:
+    if value <= 0:
+        return 1
+    return min(value, 1000)
+
+
 def _is_escape_key(key: Any) -> bool:
     char = getattr(key, "char", None)
     if isinstance(char, str) and char.lower() == "\x1b":
@@ -107,6 +113,8 @@ class ReplaySummary:
     replayed_events: int
     skipped_events: int
     speed_factor: float
+    repeat_count: int
+    completed_loops: int
     stopped_by_user: bool
     diagnostics: list[dict[str, object]]
     diagnostics_file: str | None = None
@@ -117,6 +125,8 @@ class ReplaySummary:
             "replayed_events": self.replayed_events,
             "skipped_events": self.skipped_events,
             "speed_factor": self.speed_factor,
+            "repeat_count": self.repeat_count,
+            "completed_loops": self.completed_loops,
             "stopped_by_user": self.stopped_by_user,
             "diagnostics": self.diagnostics,
             "diagnostics_file": self.diagnostics_file,
@@ -141,6 +151,7 @@ class TeachSessionReplayer:
         *,
         session_id: str,
         speed_factor: float = 1.0,
+        repeat_count: int = 1,
         diagnostics_output_file: str | Path | None = None,
         save_diagnostics: bool = False,
     ) -> ReplaySummary:
@@ -157,6 +168,8 @@ class TeachSessionReplayer:
                 replayed_events=0,
                 skipped_events=0,
                 speed_factor=1.0,
+                repeat_count=1,
+                completed_loops=0,
                 stopped_by_user=False,
                 diagnostics=[],
             )
@@ -166,6 +179,7 @@ class TeachSessionReplayer:
             return summary
 
         safe_speed = _normalize_speed_factor(speed_factor)
+        safe_repeat_count = _normalize_repeat_count(repeat_count)
         mouse_controller = mouse.Controller()
         keyboard_controller = keyboard.Controller()
         stop_event = threading.Event()
@@ -182,38 +196,48 @@ class TeachSessionReplayer:
         replayed_count = 0
         skipped_count = 0
         diagnostics: list[dict[str, object]] = []
-        previous_time = _event_time_ms(events[0])
+        completed_loops = 0
 
-        for event in events:
+        for loop_index in range(safe_repeat_count):
             if stop_event.is_set():
                 break
-            current_time = _event_time_ms(event)
-            delay_seconds = max(0, current_time - previous_time) / 1000 / safe_speed
-            if delay_seconds > 0:
-                if not _sleep_with_stop(delay_seconds, stop_event):
-                    break
-            previous_time = current_time
+            previous_time = _event_time_ms(events[0])
 
-            result = self._apply_event(
-                event=event,
-                mouse_module=mouse,
-                keyboard_module=keyboard,
-                mouse_controller=mouse_controller,
-                keyboard_controller=keyboard_controller,
-            )
-            diagnostics.append(
-                {
-                    "event_id": event.event_id,
-                    "event_type": event.event_type.value,
-                    "applied": result.applied,
-                    "reason": result.reason,
-                    "details": result.details,
-                }
-            )
-            if result.applied:
-                replayed_count += 1
-            else:
-                skipped_count += 1
+            for event in events:
+                if stop_event.is_set():
+                    break
+                current_time = _event_time_ms(event)
+                delay_seconds = max(0, current_time - previous_time) / 1000 / safe_speed
+                if delay_seconds > 0:
+                    if not _sleep_with_stop(delay_seconds, stop_event):
+                        break
+                previous_time = current_time
+
+                result = self._apply_event(
+                    event=event,
+                    mouse_module=mouse,
+                    keyboard_module=keyboard,
+                    mouse_controller=mouse_controller,
+                    keyboard_controller=keyboard_controller,
+                )
+                diagnostics.append(
+                    {
+                        "loop": loop_index + 1,
+                        "event_id": event.event_id,
+                        "event_type": event.event_type.value,
+                        "applied": result.applied,
+                        "reason": result.reason,
+                        "details": result.details,
+                    }
+                )
+                if result.applied:
+                    replayed_count += 1
+                else:
+                    skipped_count += 1
+
+            if stop_event.is_set():
+                break
+            completed_loops += 1
 
         stop_listener.stop()
         summary = ReplaySummary(
@@ -221,6 +245,8 @@ class TeachSessionReplayer:
             replayed_events=replayed_count,
             skipped_events=skipped_count,
             speed_factor=safe_speed,
+            repeat_count=safe_repeat_count,
+            completed_loops=completed_loops,
             stopped_by_user=stop_event.is_set(),
             diagnostics=diagnostics,
         )

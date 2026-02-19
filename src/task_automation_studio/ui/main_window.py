@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -347,6 +348,10 @@ class TeachSessionTab(QWidget):
         self.replay_speed_input.setSingleStep(0.1)
         self.replay_speed_input.setValue(1.0)
         actions_form.addRow("Replay speed", self.replay_speed_input)
+        self.replay_repeat_input = QSpinBox()
+        self.replay_repeat_input.setRange(1, 1000)
+        self.replay_repeat_input.setValue(1)
+        actions_form.addRow("Replay repeats", self.replay_repeat_input)
         self.replay_button = QPushButton("Replay Session")
         self.replay_button.clicked.connect(self._replay_session)
         actions_form.addRow("", self.replay_button)
@@ -553,6 +558,7 @@ class TeachSessionTab(QWidget):
             summary = self._replayer.replay(
                 session_id=session_id,
                 speed_factor=float(self.replay_speed_input.value()),
+                repeat_count=int(self.replay_repeat_input.value()),
                 save_diagnostics=True,
             )
         except Exception as exc:
@@ -574,6 +580,8 @@ class TeachSessionTab(QWidget):
             "replayed_events": payload.get("replayed_events"),
             "skipped_events": payload.get("skipped_events"),
             "speed_factor": payload.get("speed_factor"),
+            "repeat_count": payload.get("repeat_count"),
+            "completed_loops": payload.get("completed_loops"),
             "stopped_by_user": payload.get("stopped_by_user"),
             "diagnostics_file": payload.get("diagnostics_file"),
             "failed_event_count": len(failed),
